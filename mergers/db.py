@@ -108,11 +108,7 @@ def clear_mergers(conn: sqlite3.Connection) -> None:
 
 
 def insert_merger(conn: sqlite3.Connection, merger: Merger) -> None:
-    determination = merger.accc_determination
-    if not determination and merger.phase_2_determination:
-        determination = merger.phase_2_determination
-    if not determination and merger.phase_1_determination:
-        determination = merger.phase_1_determination
+    determination = merger.outcome()
 
     conn.execute(
         """
