@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
+from datetime import datetime
 from typing import Optional
 
 import typer
@@ -11,6 +12,19 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from . import db, display, sync
 from .db import SearchFilters
+
+
+def _format_local_timestamp(generated_at: str | None) -> str:
+    if not generated_at:
+        return "—"
+    try:
+        dt = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+    except ValueError:
+        return generated_at
+    local = dt.astimezone()
+    tz_name = local.strftime("%Z") or local.strftime("%z")
+    return f"{local.strftime('%Y-%m-%d %H:%M:%S')} {tz_name}".rstrip()
+
 
 app = typer.Typer(
     add_completion=False,
@@ -38,7 +52,7 @@ def _auto_sync_if_needed() -> None:
     _run_sync()
 
 
-def _run_sync(force: bool = False) -> sync.SyncResult:
+def _run_sync(force: bool = False, verbose: bool = False) -> sync.SyncResult:
     c = display.console()
     with Progress(
         SpinnerColumn(),
@@ -59,12 +73,18 @@ def _run_sync(force: bool = False) -> sync.SyncResult:
             f"[green]Indexed {result.mergers} mergers "
             f"and {result.questionnaires} questionnaires.[/]"
         )
+        c.print(
+            f"[dim]Bundle version {manifest.get('version')} · "
+            f"generated {manifest.get('generated_at')}[/]"
+        )
     else:
-        c.print("[green]Local index already up to date.[/]")
-    c.print(
-        f"[dim]Bundle version {manifest.get('version')} · "
-        f"generated {manifest.get('generated_at')}[/]"
-    )
+        local_ts = _format_local_timestamp(manifest.get("generated_at"))
+        c.print(f"[green]Data up to date (last update {local_ts})[/]")
+        if verbose:
+            c.print(
+                f"[dim]Bundle version {manifest.get('version')} · "
+                f"generated {manifest.get('generated_at')}[/]"
+            )
     return result
 
 
@@ -73,9 +93,12 @@ def sync_cmd(
     force: bool = typer.Option(
         False, "--force", help="Skip the hash check and re-download + reindex."
     ),
+    verbose: bool = typer.Option(
+        False, "--verbose", help="Show bundle version and UTC timestamp."
+    ),
 ) -> None:
     """Download and index the latest data from GitHub."""
-    _run_sync(force=force)
+    _run_sync(force=force, verbose=verbose)
 
 
 @app.command(name="status")
