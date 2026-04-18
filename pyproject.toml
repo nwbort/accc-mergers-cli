@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "accc-mergers-cli"
+version = "0.1.0"
+description = "Local CLI for querying the ACCC merger register"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "ACCC Mergers CLI" }]
+dependencies = [
+    "typer>=0.12",
+    "rich>=13.7",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+mergers = "mergers.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["mergers*"]
+exclude = ["tests*"]
