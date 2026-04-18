@@ -1,22 +1,14 @@
-"""Small fixture payloads mimicking the ACCC data format."""
+"""Small fixture payloads mimicking the ACCC bundled CLI data format."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
+from typing import Any
 
-
-def write_fixture_tree(root: Path) -> None:
-    (root / "mergers").mkdir(parents=True, exist_ok=True)
-
-    index = [
-        {"merger_id": "MN-01016"},
-        {"merger_id": "MN-01017"},
-        {"merger_id": "MN-01019"},
-    ]
-    (root / "mergers.json").write_text(json.dumps(index))
-
-    mn_01016 = {
+MERGERS: list[dict[str, Any]] = [
+    {
         "merger_id": "MN-01016",
         "merger_name": "Asahi – Warehouse site (Deer Park, Vic)",
         "status": "Completed",
@@ -71,12 +63,14 @@ def write_fixture_tree(root: Path) -> None:
             }
         ],
         "comments": [
-            {"commentary": "A routine clearance of a vertical logistics transaction.", "tags": ["routine"]}
+            {
+                "commentary": "A routine clearance of a vertical logistics transaction.",
+                "tags": ["routine"],
+            }
         ],
-    }
-    (root / "mergers" / "MN-01016.json").write_text(json.dumps(mn_01016))
-
-    mn_01017 = {
+        "has_questionnaire": True,
+    },
+    {
         "merger_id": "MN-01017",
         "merger_name": "PharmaCo – Generic medicine portfolio",
         "status": "Under review",
@@ -114,10 +108,9 @@ def write_fixture_tree(root: Path) -> None:
         "comments": [
             {"commentary": "Landmark pharmaceutical transaction.", "tags": ["landmark"]}
         ],
-    }
-    (root / "mergers" / "MN-01017.json").write_text(json.dumps(mn_01017))
-
-    mn_01019 = {
+        "has_questionnaire": False,
+    },
+    {
         "merger_id": "MN-01019",
         "merger_name": "Ampol – Fuel retail sites",
         "status": "Completed",
@@ -153,58 +146,114 @@ def write_fixture_tree(root: Path) -> None:
             }
         ],
         "comments": [],
-    }
-    (root / "mergers" / "MN-01019.json").write_text(json.dumps(mn_01019))
+        "has_questionnaire": False,
+    },
+]
 
-    questionnaires = {
-        "MN-01016": {
-            "deadline": "25 August 2025",
-            "questions_count": 3,
-            "questions": [
-                {
-                    "number": "1",
-                    "text": "Outline any concerns regarding the impact of the proposed acquisition on competition in the relevant market.",
-                },
-                {
-                    "number": "2",
-                    "text": "Provide any additional information that would assist the ACCC's assessment of the geographic market.",
-                },
-                {
-                    "number": "3",
-                    "text": "Provide a brief description of your business and its relationship to the parties.",
-                },
-            ],
-        }
-    }
-    (root / "questionnaire_data.json").write_text(json.dumps(questionnaires))
-
-    stats = {
-        "totals": {
-            "total_mergers": 3,
-            "approved": 2,
-            "phase_2": 1,
-        },
-        "phase_durations": {
-            "phase_1": {"average": 30, "median": 28},
-        },
-        "top_industries": [
-            {"name": "Beverage Manufacturing", "count": 1},
-            {"name": "Fuel Retailing", "count": 1},
-        ],
-        "recent_determinations": [
+QUESTIONNAIRES: dict[str, dict[str, Any]] = {
+    "MN-01016": {
+        "deadline": "25 August 2025",
+        "questions_count": 3,
+        "questions": [
             {
-                "merger_id": "MN-01016",
-                "merger_name": "Asahi – Warehouse site",
-                "determination": "Approved",
-                "date": "2025-09-12",
-            }
+                "number": "1",
+                "text": "Outline any concerns regarding the impact of the proposed acquisition on competition in the relevant market.",
+            },
+            {
+                "number": "2",
+                "text": "Provide any additional information that would assist the ACCC's assessment of the geographic market.",
+            },
+            {
+                "number": "3",
+                "text": "Provide a brief description of your business and its relationship to the parties.",
+            },
         ],
     }
-    (root / "stats.json").write_text(json.dumps(stats))
+}
 
-    industries = [
-        {"code": "1212", "name": "Beverage Manufacturing"},
-        {"code": "1841", "name": "Pharmaceutical Product Manufacturing"},
-        {"code": "4000", "name": "Fuel Retailing"},
-    ]
-    (root / "industries.json").write_text(json.dumps(industries))
+STATS: dict[str, Any] = {
+    "totals": {
+        "total_mergers": 3,
+        "approved": 2,
+        "phase_2": 1,
+    },
+    "phase_durations": {
+        "phase_1": {"average": 30, "median": 28},
+    },
+    "top_industries": [
+        {"name": "Beverage Manufacturing", "count": 1},
+        {"name": "Fuel Retailing", "count": 1},
+    ],
+    "recent_determinations": [
+        {
+            "merger_id": "MN-01016",
+            "merger_name": "Asahi – Warehouse site",
+            "determination": "Approved",
+            "date": "2025-09-12",
+        }
+    ],
+}
+
+INDUSTRIES: list[dict[str, Any]] = [
+    {"code": "1212", "name": "Beverage Manufacturing"},
+    {"code": "1841", "name": "Pharmaceutical Product Manufacturing"},
+    {"code": "4000", "name": "Fuel Retailing"},
+]
+
+
+def _canonical(payload: Any) -> bytes:
+    """Serialise JSON in a stable, compact form and return its bytes."""
+    return json.dumps(payload, separators=(",", ":"), sort_keys=False).encode()
+
+
+def write_bundle_tree(
+    root: Path,
+    *,
+    mergers: list[dict[str, Any]] | None = None,
+    questionnaires: dict[str, dict[str, Any]] | None = None,
+    stats: Any = STATS,
+    industries: Any = INDUSTRIES,
+    version: int = 1,
+    generated_at: str = "2026-04-18T04:48:02Z",
+    corrupt_bundle: bool = False,
+    fake_merger_count: int | None = None,
+) -> Path:
+    """Write the three CLI bundle files to ``root`` and return ``root``.
+
+    Mirrors the layout of ``nwbort/accc-mergers/data/output/cli/``.
+    """
+    root.mkdir(parents=True, exist_ok=True)
+
+    bundle = {
+        "mergers": mergers if mergers is not None else MERGERS,
+        "questionnaires": (
+            questionnaires if questionnaires is not None else QUESTIONNAIRES
+        ),
+        "stats": stats,
+        "industries": industries,
+    }
+    bundle_bytes = _canonical(bundle)
+    bundle_sha = hashlib.sha256(bundle_bytes).hexdigest()
+    if corrupt_bundle:
+        bundle_bytes = bundle_bytes + b" "
+
+    per_merger = {m["merger_id"]: hashlib.sha256(_canonical(m)).hexdigest() for m in bundle["mergers"]}
+    per_merger_bytes = _canonical(per_merger)
+    per_merger_sha = hashlib.sha256(per_merger_bytes).hexdigest()
+
+    manifest = {
+        "version": version,
+        "generated_at": generated_at,
+        "merger_count": (
+            fake_merger_count
+            if fake_merger_count is not None
+            else len(bundle["mergers"])
+        ),
+        "bundle_sha256": bundle_sha,
+        "merger_manifest_sha256": per_merger_sha,
+    }
+
+    (root / "cli-manifest.json").write_bytes(_canonical(manifest))
+    (root / "cli-bundle.json").write_bytes(bundle_bytes)
+    (root / "cli-merger-manifest.json").write_bytes(per_merger_bytes)
+    return root
