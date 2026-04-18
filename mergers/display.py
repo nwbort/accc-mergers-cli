@@ -177,7 +177,6 @@ def _render_determination_sections(merger: Merger, section: str) -> None:
         "reasons": "reasons for determination",
         "overlap": "overlap and relationship between the parties",
         "parties": "parties to the acquisition",
-        "determination": "determination",
     }
     target = filter_map.get(section)
 

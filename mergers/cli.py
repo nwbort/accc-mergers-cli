@@ -192,7 +192,7 @@ def show(
     section: str = typer.Option(
         "all",
         "--section",
-        help="all | reasons | overlap | parties | determination",
+        help="all | determination (full determination content) | reasons | overlap | parties",
     ),
     json_output: bool = typer.Option(
         False, "--json", help="Output raw merger JSON."
