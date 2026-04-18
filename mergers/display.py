@@ -395,14 +395,57 @@ _EVENT_LABELS: dict[str, str] = {
 }
 
 
-def _humanize_event_label(event_type: str | None) -> str:
-    if not event_type:
-        return "Milestone"
-    key = event_type.strip().lower().replace(" ", "_")
-    if key in _EVENT_LABELS:
-        return _EVENT_LABELS[key]
-    pretty = event_type.replace("_", " ").strip()
-    return pretty[:1].upper() + pretty[1:] if pretty else "Milestone"
+# Ordered patterns used to classify free-form event titles from the register.
+# The first match wins, so keep more specific phrases above generic ones.
+_TITLE_PATTERNS: list[tuple[str, str]] = [
+    ("phase 2 review", "Referred to Phase 2"),
+    ("phase 2 notice", "Phase 2 notice issued"),
+    ("phase 2 determination", "Phase 2 determination"),
+    ("phase 1 determination", "Phase 1 determination"),
+    ("not have an effective notification", "Notification ruled incomplete"),
+    ("materially incomplete", "Notification ruled incomplete"),
+    ("effective notification date", "Effective notification confirmed"),
+    ("merger notified", "Merger notified to ACCC"),
+    ("notification withdrawn", "Notification withdrawn"),
+    ("third party questionnaire", "Third-party questionnaire"),
+    ("questionnaire", "Questionnaire published"),
+    ("submission", "Submission received"),
+    ("statement of issues", "Statement of issues"),
+    ("undertaking", "Undertaking lodged"),
+    ("waiver granted", "Waiver granted"),
+    ("waiver denied", "Waiver denied"),
+    ("waiver", "Waiver update"),
+    ("determination", "Determination issued"),
+    ("public register", "Public register updated"),
+]
+
+
+def _label_from_title(title: str) -> str:
+    lowered = title.lower()
+    for needle, label in _TITLE_PATTERNS:
+        if needle in lowered:
+            return label
+    # Keep short titles intact; truncate long legalese to a single clause.
+    cleaned = title.strip().rstrip(".")
+    if len(cleaned) <= 60:
+        return cleaned
+    first_clause = cleaned.split(",")[0].split(".")[0]
+    return first_clause[:60].rstrip() + "…"
+
+
+def _humanize_event_label(
+    event_type: str | None, title: str | None = None
+) -> str:
+    if event_type:
+        key = event_type.strip().lower().replace(" ", "_")
+        if key in _EVENT_LABELS:
+            return _EVENT_LABELS[key]
+        pretty = event_type.replace("_", " ").strip()
+        if pretty:
+            return pretty[:1].upper() + pretty[1:]
+    if title:
+        return _label_from_title(title)
+    return "Milestone"
 
 
 def timeline_events(merger: Merger) -> list[dict[str, Any]]:
@@ -432,7 +475,9 @@ def timeline_events(merger: Merger) -> list[dict[str, Any]]:
     )
     _add(merger.effective_notification_datetime, notification_label)
     for event in merger.events:
-        _add(event.event_date, _humanize_event_label(event.event_type), event.description)
+        label = _humanize_event_label(event.event_type, event.title)
+        detail = event.description or (event.title if label != event.title else None)
+        _add(event.event_date, label, detail)
     _add(merger.determination_publication_date, "Determination published")
 
     records.sort(key=lambda r: r["date"] or "")
