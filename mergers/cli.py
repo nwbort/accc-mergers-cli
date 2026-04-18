@@ -128,8 +128,8 @@ def _parse_filters(
             raise typer.BadParameter(
                 f"--outcome must be one of {sorted(allowed)}"
             )
-    if phase is not None and phase not in (1, 2):
-        raise typer.BadParameter("--phase must be 1 or 2")
+    if phase is not None and phase not in (0, 1, 2):
+        raise typer.BadParameter("--phase must be 0 (waivers), 1, or 2")
     return SearchFilters(
         outcome=outcome.lower() if outcome else None,
         industry=industry,
@@ -150,7 +150,7 @@ def search(
         None, "--industry", help="Partial industry name match."
     ),
     phase: Optional[int] = typer.Option(
-        None, "--phase", help="1 or 2"
+        None, "--phase", help="0 (waivers), 1, or 2"
     ),
     waiver: Optional[bool] = typer.Option(
         None,
@@ -243,7 +243,9 @@ def show(
 def list_cmd(
     outcome: Optional[str] = typer.Option(None, "--outcome"),
     industry: Optional[str] = typer.Option(None, "--industry"),
-    phase: Optional[int] = typer.Option(None, "--phase"),
+    phase: Optional[int] = typer.Option(
+        None, "--phase", help="0 (waivers), 1, or 2"
+    ),
     waiver: Optional[bool] = typer.Option(None, "--waiver/--no-waiver"),
     year: Optional[int] = typer.Option(None, "--year"),
     limit: int = typer.Option(50, "--limit"),

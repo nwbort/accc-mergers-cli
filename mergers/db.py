@@ -262,7 +262,9 @@ def _apply_filters(
     if filters.industry:
         extra_where.append("LOWER(m.industries_text) LIKE ?")
         params.append(f"%{filters.industry.lower()}%")
-    if filters.phase is not None:
+    if filters.phase == 0:
+        extra_where.append("m.is_waiver = 1")
+    elif filters.phase is not None:
         extra_where.append("m.phase = ?")
         params.append(filters.phase)
     if filters.waiver is True:
