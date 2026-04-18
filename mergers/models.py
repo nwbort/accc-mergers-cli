@@ -52,6 +52,8 @@ class Event:
     event_type: str | None = None
     event_date: str | None = None
     description: str | None = None
+    title: str | None = None
+    phase: str | None = None
     determination_table_content: list[DeterminationSection] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)
 
@@ -65,6 +67,8 @@ class Event:
             event_type=data.get("event_type") or data.get("type"),
             event_date=data.get("event_date") or data.get("date"),
             description=data.get("description"),
+            title=data.get("display_title") or data.get("title"),
+            phase=data.get("phase"),
             determination_table_content=sections,
             raw=data,
         )
