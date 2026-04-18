@@ -18,6 +18,8 @@ BASE_URL = (
     "merger-tracker/frontend/public/data"
 )
 INDEX_URL = f"{BASE_URL}/mergers.json"
+LIST_META_URL = f"{BASE_URL}/mergers/list-meta.json"
+LIST_PAGE_URL = f"{BASE_URL}/mergers/list-page-{{page}}.json"
 STATS_URL = f"{BASE_URL}/stats.json"
 QUESTIONNAIRE_URL = f"{BASE_URL}/questionnaire_data.json"
 INDUSTRIES_URL = f"{BASE_URL}/industries.json"
@@ -43,11 +45,40 @@ async def _fetch_merger(
             return None
 
 
+async def _fetch_all_merger_ids(client: httpx.AsyncClient) -> list[str]:
+    """Return every merger ID published by the tracker.
+
+    Uses the paginated ``mergers/list-page-N.json`` index when available, since
+    ``mergers.json`` only contains the subset of notifications surfaced on the
+    landing page and omits waiver (``WA-*``) records entirely.
+    """
+    ids: list[str] = []
+    seen: set[str] = set()
+
+    meta = await _safe_fetch(client, LIST_META_URL)
+    if isinstance(meta, dict):
+        total_pages = int(meta.get("total_pages") or 0)
+        for page in range(1, total_pages + 1):
+            page_data = await _safe_fetch(client, LIST_PAGE_URL.format(page=page))
+            for mid in _extract_merger_ids(page_data):
+                if mid not in seen:
+                    seen.add(mid)
+                    ids.append(mid)
+
+    if not ids:
+        index_data = await _fetch_json(client, INDEX_URL)
+        for mid in _extract_merger_ids(index_data):
+            if mid not in seen:
+                seen.add(mid)
+                ids.append(mid)
+
+    return ids
+
+
 async def _download_all(progress_cb=None) -> dict[str, Any]:
     """Download the index, individual mergers, stats, questionnaires, and industries."""
     async with httpx.AsyncClient(follow_redirects=True) as client:
-        index_data = await _fetch_json(client, INDEX_URL)
-        merger_ids = _extract_merger_ids(index_data)
+        merger_ids = await _fetch_all_merger_ids(client)
 
         semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
         total = len(merger_ids)
