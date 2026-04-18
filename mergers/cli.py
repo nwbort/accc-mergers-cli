@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict
 from datetime import datetime
 from typing import Optional
@@ -27,10 +28,24 @@ def _format_local_timestamp(generated_at: str | None) -> str:
 
 
 app = typer.Typer(
-    add_completion=False,
+    add_completion=True,
     help="Query the ACCC merger register from your terminal.",
     no_args_is_help=True,
 )
+
+
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _validate_iso_date(value: str | None, flag: str) -> str | None:
+    if value is None:
+        return None
+    value = value.strip()
+    if not _ISO_DATE_RE.match(value):
+        raise typer.BadParameter(
+            f"{flag} must be an ISO date (YYYY-MM-DD), got '{value}'"
+        )
+    return value
 
 
 def _with_connection():
@@ -144,6 +159,8 @@ def _parse_filters(
     waiver: bool | None,
     year: int | None,
     limit: int,
+    since: str | None = None,
+    until: str | None = None,
 ) -> SearchFilters:
     if outcome is not None:
         allowed = {"approved", "denied", "phase2", "pending"}
@@ -153,19 +170,25 @@ def _parse_filters(
             )
     if phase is not None and phase not in (0, 1, 2):
         raise typer.BadParameter("--phase must be 0 (waivers), 1, or 2")
+    since = _validate_iso_date(since, "--since")
+    until = _validate_iso_date(until, "--until")
+    if since and until and since > until:
+        raise typer.BadParameter("--since must be on or before --until")
     return SearchFilters(
         outcome=outcome.lower() if outcome else None,
         industry=industry,
         phase=phase,
         waiver=waiver,
         year=year,
+        since=since,
+        until=until,
         limit=limit,
     )
 
 
 @app.command()
 def search(
-    query: str = typer.Argument(..., help="Full-text search query."),
+    query: str = typer.Argument(..., help="Full-text search query, or regex if --regex is set."),
     outcome: Optional[str] = typer.Option(
         None, "--outcome", help="approved | denied | phase2 | pending"
     ),
@@ -183,6 +206,21 @@ def search(
     year: Optional[int] = typer.Option(
         None, "--year", help="Notification year."
     ),
+    since: Optional[str] = typer.Option(
+        None,
+        "--since",
+        help="Only include mergers notified on or after this date (YYYY-MM-DD).",
+    ),
+    until: Optional[str] = typer.Option(
+        None,
+        "--until",
+        help="Only include mergers notified on or before this date (YYYY-MM-DD).",
+    ),
+    regex: bool = typer.Option(
+        False,
+        "--regex",
+        help="Interpret the query as a Python regex instead of an FTS query.",
+    ),
     limit: int = typer.Option(10, "--limit", help="Max results."),
     json_output: bool = typer.Option(
         False, "--json", help="Output raw JSON."
@@ -190,11 +228,20 @@ def search(
 ) -> None:
     """Full-text search across merger descriptions and determination text."""
     _auto_sync_if_needed()
-    filters = _parse_filters(outcome, industry, phase, waiver, year, limit)
+    filters = _parse_filters(
+        outcome, industry, phase, waiver, year, limit, since=since, until=until
+    )
 
     conn = _with_connection()
     try:
-        rows = db.search(conn, query, filters)
+        if regex:
+            try:
+                pattern = re.compile(query, re.IGNORECASE | re.DOTALL)
+            except re.error as exc:
+                raise typer.BadParameter(f"Invalid regex: {exc}")
+            rows = db.search_regex(conn, pattern, filters)
+        else:
+            rows = db.search(conn, query, filters)
     finally:
         conn.close()
 
@@ -262,6 +309,105 @@ def show(
     display.show_merger(merger, questionnaire, section=section)
 
 
+@app.command()
+def timeline(
+    merger_id: str = typer.Argument(
+        ..., help="Merger ID, e.g. MN-01016 (also accepts 'mn 01016')."
+    ),
+    json_output: bool = typer.Option(
+        False, "--json", help="Output the timeline as JSON."
+    ),
+) -> None:
+    """Show a chronological timeline for a single merger."""
+    _auto_sync_if_needed()
+
+    conn = _with_connection()
+    try:
+        merger = db.get_merger(conn, merger_id)
+    finally:
+        conn.close()
+
+    if not merger:
+        display.console().print(
+            f"[red]No merger found with ID '{merger_id}'.[/]"
+        )
+        raise typer.Exit(code=1)
+
+    events = display.timeline_events(merger)
+
+    if json_output:
+        display.print_json(
+            {
+                "merger_id": merger.merger_id,
+                "merger_name": merger.merger_name,
+                "stage": merger.stage,
+                "outcome": merger.outcome(),
+                "notification_date": merger.effective_notification_datetime,
+                "determination_date": merger.determination_publication_date,
+                "events": events,
+            }
+        )
+        return
+
+    display.show_timeline(merger)
+
+
+@app.command()
+def party(
+    name: str = typer.Argument(
+        ..., help="Party name (partial match, case-insensitive)."
+    ),
+    role: Optional[str] = typer.Option(
+        None,
+        "--role",
+        help="Restrict to 'acquirer' or 'target'; default searches both.",
+    ),
+    outcome: Optional[str] = typer.Option(None, "--outcome"),
+    industry: Optional[str] = typer.Option(None, "--industry"),
+    phase: Optional[int] = typer.Option(None, "--phase"),
+    waiver: Optional[bool] = typer.Option(None, "--waiver/--no-waiver"),
+    year: Optional[int] = typer.Option(None, "--year"),
+    since: Optional[str] = typer.Option(None, "--since"),
+    until: Optional[str] = typer.Option(None, "--until"),
+    limit: int = typer.Option(50, "--limit"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """List mergers involving a given acquirer or target."""
+    _auto_sync_if_needed()
+
+    if role is not None and role.lower() not in {"acquirer", "target"}:
+        raise typer.BadParameter("--role must be 'acquirer' or 'target'")
+
+    filters = _parse_filters(
+        outcome, industry, phase, waiver, year, limit, since=since, until=until
+    )
+
+    conn = _with_connection()
+    try:
+        rows = db.mergers_by_party(
+            conn,
+            name,
+            filters=filters,
+            role=role.lower() if role else None,
+        )
+    finally:
+        conn.close()
+
+    if json_output:
+        display.print_json([display.row_as_dict(r) for r in rows])
+        return
+
+    if not rows:
+        display.console().print(
+            f"[yellow]No mergers found for party '{name}'.[/]"
+        )
+        return
+
+    display.console().print(
+        display.render_results_table(rows, title=f"Mergers involving '{name}'")
+    )
+
+
 @app.command(name="list")
 def list_cmd(
     outcome: Optional[str] = typer.Option(None, "--outcome"),
@@ -271,6 +417,12 @@ def list_cmd(
     ),
     waiver: Optional[bool] = typer.Option(None, "--waiver/--no-waiver"),
     year: Optional[int] = typer.Option(None, "--year"),
+    since: Optional[str] = typer.Option(
+        None, "--since", help="Notified on or after (YYYY-MM-DD)."
+    ),
+    until: Optional[str] = typer.Option(
+        None, "--until", help="Notified on or before (YYYY-MM-DD)."
+    ),
     limit: int = typer.Option(50, "--limit"),
     sort: str = typer.Option(
         "date-desc",
@@ -281,7 +433,9 @@ def list_cmd(
 ) -> None:
     """Browse mergers with filters, no search query required."""
     _auto_sync_if_needed()
-    filters = _parse_filters(outcome, industry, phase, waiver, year, limit)
+    filters = _parse_filters(
+        outcome, industry, phase, waiver, year, limit, since=since, until=until
+    )
 
     allowed_sort = {"date-asc", "date-desc", "name", "duration"}
     if sort not in allowed_sort:

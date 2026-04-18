@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from mergers import db
 from mergers.db import SearchFilters
 
@@ -114,6 +116,90 @@ def test_get_questionnaire_accepts_lowercase_and_space(populated_db):
         assert db.get_questionnaire(conn, "mn 01016").merger_id == "MN-01016"
     finally:
         conn.close()
+
+
+def test_search_filter_since(populated_db):
+    conn = db.connect()
+    try:
+        rows = db.list_mergers(
+            conn, SearchFilters(since="2025-01-01", limit=10)
+        )
+    finally:
+        conn.close()
+    ids = _ids(rows)
+    assert "MN-01016" in ids
+    assert "MN-01017" in ids
+    assert "MN-01019" not in ids  # 2024 notification is excluded
+
+
+def test_search_filter_until(populated_db):
+    conn = db.connect()
+    try:
+        rows = db.list_mergers(
+            conn, SearchFilters(until="2025-06-01", limit=10)
+        )
+    finally:
+        conn.close()
+    ids = _ids(rows)
+    assert "MN-01019" in ids   # 2024-11-11 is before cutoff
+    assert "MN-01017" in ids   # 2025-05-01 is before cutoff
+    assert "MN-01016" not in ids  # 2025-08-15 is after cutoff
+
+
+def test_search_filter_since_and_until(populated_db):
+    conn = db.connect()
+    try:
+        rows = db.list_mergers(
+            conn,
+            SearchFilters(since="2025-01-01", until="2025-06-01", limit=10),
+        )
+    finally:
+        conn.close()
+    assert _ids(rows) == ["MN-01017"]
+
+
+def test_search_regex_matches(populated_db):
+    conn = db.connect()
+    try:
+        pattern = re.compile(r"oncology", re.IGNORECASE)
+        rows = db.search_regex(conn, pattern, SearchFilters(limit=10))
+    finally:
+        conn.close()
+    assert _ids(rows) == ["MN-01017"]
+
+
+def test_search_regex_respects_filters(populated_db):
+    conn = db.connect()
+    try:
+        pattern = re.compile(r".+", re.IGNORECASE)
+        rows = db.search_regex(
+            conn, pattern, SearchFilters(outcome="approved", limit=10)
+        )
+    finally:
+        conn.close()
+    ids = set(_ids(rows))
+    assert ids == {"MN-01016", "MN-01019"}
+
+
+def test_mergers_by_party_matches_either_role(populated_db):
+    conn = db.connect()
+    try:
+        rows = db.mergers_by_party(conn, "asahi")
+    finally:
+        conn.close()
+    assert _ids(rows) == ["MN-01016"]
+
+
+def test_mergers_by_party_role_filter(populated_db):
+    conn = db.connect()
+    try:
+        # PharmaCo is the acquirer; GenericsRUs is the target.
+        acquirer_rows = db.mergers_by_party(conn, "pharmaco", role="acquirer")
+        target_rows = db.mergers_by_party(conn, "pharmaco", role="target")
+    finally:
+        conn.close()
+    assert _ids(acquirer_rows) == ["MN-01017"]
+    assert target_rows == []
 
 
 def test_search_questions(populated_db):
