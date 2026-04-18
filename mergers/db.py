@@ -319,7 +319,13 @@ def list_mergers(
     return conn.execute(sql, params).fetchall()
 
 
+def normalize_merger_id(merger_id: str) -> str:
+    """Accept lowercase variants and space separators (e.g. ``mn 01016``)."""
+    return merger_id.strip().upper().replace(" ", "-")
+
+
 def get_merger(conn: sqlite3.Connection, merger_id: str) -> Merger | None:
+    merger_id = normalize_merger_id(merger_id)
     row = conn.execute(
         "SELECT raw_json FROM mergers WHERE merger_id = ?", (merger_id,)
     ).fetchone()
@@ -331,6 +337,7 @@ def get_merger(conn: sqlite3.Connection, merger_id: str) -> Merger | None:
 def get_questionnaire(
     conn: sqlite3.Connection, merger_id: str
 ) -> Questionnaire | None:
+    merger_id = normalize_merger_id(merger_id)
     row = conn.execute(
         "SELECT * FROM questionnaires WHERE merger_id = ?", (merger_id,)
     ).fetchone()
