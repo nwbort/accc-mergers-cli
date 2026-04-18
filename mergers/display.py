@@ -400,6 +400,10 @@ _EVENT_LABELS: dict[str, str] = {
 _TITLE_PATTERNS: list[tuple[str, str]] = [
     ("phase 2 review", "Referred to Phase 2"),
     ("phase 2 notice", "Phase 2 notice issued"),
+    ("extend the phase 1", "Phase 1 period extended"),
+    ("extend the phase 2", "Phase 2 period extended"),
+    ("phase 1 determination period", "Phase 1 period extended"),
+    ("phase 2 determination period", "Phase 2 period extended"),
     ("phase 2 determination", "Phase 2 determination"),
     ("phase 1 determination", "Phase 1 determination"),
     ("not have an effective notification", "Notification ruled incomplete"),

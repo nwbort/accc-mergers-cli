@@ -213,6 +213,40 @@ def test_cli_timeline_unknown_id(populated_db):
     assert result.exit_code != 0
 
 
+def test_timeline_extension_not_labelled_as_determination():
+    """An 'extend the Phase 1 determination period' event is an extension, not a determination.
+
+    Regression for MN-01019, where the 2025-11-06 period-extension event was
+    mis-labelled as 'Phase 1 determination' because the title contains that
+    substring. The actual Phase 1 decision came later (referral to Phase 2).
+    """
+    from mergers.models import Event, Merger
+    m = Merger(
+        merger_id="MN-01019",
+        merger_name="Ampol – EG Australia",
+        stage="Phase 2",
+        effective_notification_datetime="2025-10-10T12:00:00Z",
+        events=[
+            Event(
+                event_date="2025-11-06T12:00:00Z",
+                title=(
+                    "ACCC decided to extend the Phase 1 determination period "
+                    "following receipt of extension request from Ampol, to "
+                    "allow Ampol to provide additional information."
+                ),
+            ),
+            Event(
+                event_date="2026-01-20T12:00:00Z",
+                title="ACCC decided notification is subject to Phase 2 review",
+            ),
+        ],
+    )
+    events = display.timeline_events(m)
+    by_date = {e["date"][:10]: e["label"] for e in events}
+    assert by_date["2025-11-06"] == "Phase 1 period extended"
+    assert by_date["2026-01-20"] == "Referred to Phase 2"
+
+
 def test_cli_party_finds_acquirer(populated_db):
     result = runner.invoke(app, ["party", "asahi", "--json"])
     assert result.exit_code == 0, result.output
