@@ -372,6 +372,39 @@ def _days_between(a: str | None, b: str | None) -> int | None:
     return (end.date() - start.date()).days
 
 
+_EVENT_LABELS: dict[str, str] = {
+    "notification": "Notification lodged",
+    "determination": "Determination issued",
+    "phase_1": "Phase 1 determination",
+    "phase_1_determination": "Phase 1 determination",
+    "phase_2": "Phase 2 determination",
+    "phase_2_determination": "Phase 2 determination",
+    "phase_2_referral": "Referred to Phase 2",
+    "referral": "Referred to Phase 2",
+    "waiver": "Waiver determination",
+    "waiver_granted": "Waiver granted",
+    "waiver_denied": "Waiver denied",
+    "public_register": "Public register updated",
+    "public_register_update": "Public register updated",
+    "submission": "Submission received",
+    "consultation": "Consultation opened",
+    "consultation_closed": "Consultation closed",
+    "withdrawn": "Notification withdrawn",
+    "opposed": "ACCC opposed",
+    "not_opposed": "ACCC did not oppose",
+}
+
+
+def _humanize_event_label(event_type: str | None) -> str:
+    if not event_type:
+        return "Milestone"
+    key = event_type.strip().lower().replace(" ", "_")
+    if key in _EVENT_LABELS:
+        return _EVENT_LABELS[key]
+    pretty = event_type.replace("_", " ").strip()
+    return pretty[:1].upper() + pretty[1:] if pretty else "Milestone"
+
+
 def timeline_events(merger: Merger) -> list[dict[str, Any]]:
     """Flatten a merger's timeline into sortable event records.
 
@@ -394,10 +427,12 @@ def timeline_events(merger: Merger) -> list[dict[str, Any]]:
             {"date": date, "label": label, "description": description or ""}
         )
 
-    _add(merger.effective_notification_datetime, "Notification")
+    notification_label = (
+        "Waiver application lodged" if merger.is_waiver else "Notification lodged"
+    )
+    _add(merger.effective_notification_datetime, notification_label)
     for event in merger.events:
-        label = (event.event_type or "Event").replace("_", " ").strip().title()
-        _add(event.event_date, label, event.description)
+        _add(event.event_date, _humanize_event_label(event.event_type), event.description)
     _add(merger.determination_publication_date, "Determination published")
 
     records.sort(key=lambda r: r["date"] or "")
