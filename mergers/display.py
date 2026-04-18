@@ -484,7 +484,7 @@ def timeline_events(merger: Merger) -> list[dict[str, Any]]:
     return records
 
 
-def show_timeline(merger: Merger) -> None:
+def show_timeline(merger: Merger, show_detail: bool = False) -> None:
     c = console()
     determination = merger.outcome() or "Pending"
 
@@ -504,18 +504,21 @@ def show_timeline(merger: Merger) -> None:
     table.add_column("Date", no_wrap=True, style="bold")
     table.add_column("Event", no_wrap=True)
     table.add_column("Days from notification", justify="right", no_wrap=True)
-    table.add_column("Detail", overflow="fold")
+    if show_detail:
+        table.add_column("Detail", overflow="fold")
 
     notification_date = merger.effective_notification_datetime
     for event in events:
         delta = _days_between(notification_date, event["date"])
         delta_display = "—" if delta is None else ("0" if delta == 0 else f"+{delta}")
-        table.add_row(
+        row = [
             _format_event_date(event["date"]),
             event["label"],
             delta_display,
-            event["description"] or "",
-        )
+        ]
+        if show_detail:
+            row.append(event["description"] or "")
+        table.add_row(*row)
     c.print(table)
 
     total_days = _days_between(
