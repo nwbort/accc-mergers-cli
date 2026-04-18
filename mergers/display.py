@@ -346,6 +346,109 @@ def show_stats(stats: dict[str, Any]) -> None:
         c.print(table)
 
 
+def _parse_iso(value: str | None) -> dt.datetime | None:
+    if not value:
+        return None
+    try:
+        return dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _format_event_date(value: str | None) -> str:
+    if not value:
+        return "—"
+    parsed = _parse_iso(value)
+    if parsed is not None:
+        return parsed.strftime("%d %b %Y")
+    return value[:10] if len(value) >= 10 else value
+
+
+def _days_between(a: str | None, b: str | None) -> int | None:
+    start = _parse_iso(a)
+    end = _parse_iso(b)
+    if not start or not end:
+        return None
+    return (end.date() - start.date()).days
+
+
+def timeline_events(merger: Merger) -> list[dict[str, Any]]:
+    """Flatten a merger's timeline into sortable event records.
+
+    Combines the notification date, determination publication date, and
+    any events carried in ``merger.events``, de-duplicating entries that
+    share the same date and type. Returns records with ``date``, ``label``,
+    and optional ``description`` keys sorted chronologically.
+    """
+    records: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def _add(date: str | None, label: str, description: str | None = None) -> None:
+        if not date:
+            return
+        key = (date[:10], label.lower())
+        if key in seen:
+            return
+        seen.add(key)
+        records.append(
+            {"date": date, "label": label, "description": description or ""}
+        )
+
+    _add(merger.effective_notification_datetime, "Notification")
+    for event in merger.events:
+        label = (event.event_type or "Event").replace("_", " ").strip().title()
+        _add(event.event_date, label, event.description)
+    _add(merger.determination_publication_date, "Determination published")
+
+    records.sort(key=lambda r: r["date"] or "")
+    return records
+
+
+def show_timeline(merger: Merger) -> None:
+    c = console()
+    determination = merger.outcome() or "Pending"
+
+    header = (
+        f"[bold cyan]{merger.merger_id}[/] — [bold]{merger.merger_name}[/]\n"
+        f"Stage: {merger.stage or '—'}   "
+        f"Outcome: [{outcome_style(determination)}]{determination}[/]"
+    )
+    c.print(Panel(header, border_style="cyan"))
+
+    events = timeline_events(merger)
+    if not events:
+        c.print("[yellow]No dated events recorded for this merger.[/]")
+        return
+
+    table = Table(title="Timeline", expand=True)
+    table.add_column("Date", no_wrap=True, style="bold")
+    table.add_column("Event", no_wrap=True)
+    table.add_column("Days from notification", justify="right", no_wrap=True)
+    table.add_column("Detail", overflow="fold")
+
+    notification_date = merger.effective_notification_datetime
+    for event in events:
+        delta = _days_between(notification_date, event["date"])
+        delta_display = "—" if delta is None else ("0" if delta == 0 else f"+{delta}")
+        table.add_row(
+            _format_event_date(event["date"]),
+            event["label"],
+            delta_display,
+            event["description"] or "",
+        )
+    c.print(table)
+
+    total_days = _days_between(
+        merger.effective_notification_datetime,
+        merger.determination_publication_date,
+    )
+    if total_days is not None:
+        c.print(
+            f"[dim]Total duration:[/] notification → determination = "
+            f"{total_days} days"
+        )
+
+
 def warn_stale_cache(age_days: float) -> None:
     c = console()
     c.print(

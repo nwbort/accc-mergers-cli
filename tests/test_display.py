@@ -178,3 +178,95 @@ def test_cli_status_without_cache(temp_cache):
     result = runner.invoke(app, ["status"])
     assert result.exit_code != 0
     assert "No local cache" in _strip_ansi(result.stdout)
+
+
+def test_cli_timeline_renders_events(populated_db):
+    result = runner.invoke(app, ["timeline", "MN-01016"])
+    assert result.exit_code == 0, result.output
+    output = _strip_ansi(result.stdout)
+    assert "MN-01016" in output
+    assert "Timeline" in output
+    assert "Notification" in output
+    assert "Determination" in output
+
+
+def test_cli_timeline_json(populated_db):
+    result = runner.invoke(app, ["timeline", "MN-01016", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["merger_id"] == "MN-01016"
+    assert payload["notification_date"]
+    assert payload["events"]
+    labels = [e["label"] for e in payload["events"]]
+    assert any("Notification" in label for label in labels)
+
+
+def test_cli_timeline_unknown_id(populated_db):
+    result = runner.invoke(app, ["timeline", "MN-99999"])
+    assert result.exit_code != 0
+
+
+def test_cli_party_finds_acquirer(populated_db):
+    result = runner.invoke(app, ["party", "asahi", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert [r["merger_id"] for r in payload] == ["MN-01016"]
+
+
+def test_cli_party_role_filter(populated_db):
+    # PharmaCo is only an acquirer; searching as target returns nothing.
+    result = runner.invoke(
+        app, ["party", "pharmaco", "--role", "target", "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == []
+
+
+def test_cli_search_since_until(populated_db):
+    result = runner.invoke(
+        app,
+        [
+            "search",
+            "acquisition OR lease OR portfolio OR fuel",
+            "--since",
+            "2025-01-01",
+            "--until",
+            "2025-06-30",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    ids = [r["merger_id"] for r in payload]
+    assert "MN-01017" in ids
+    assert "MN-01019" not in ids  # 2024 notification is excluded
+
+
+def test_cli_search_rejects_bad_date(populated_db):
+    result = runner.invoke(
+        app, ["search", "warehouse", "--since", "yesterday"]
+    )
+    assert result.exit_code != 0
+    assert "--since" in _strip_ansi(result.output)
+
+
+def test_cli_search_regex(populated_db):
+    result = runner.invoke(
+        app, ["search", r"oncolog\w+", "--regex", "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert [r["merger_id"] for r in payload] == ["MN-01017"]
+
+
+def test_cli_search_rejects_invalid_regex(populated_db):
+    result = runner.invoke(app, ["search", "(unterminated", "--regex"])
+    assert result.exit_code != 0
+    assert "Invalid regex" in _strip_ansi(result.output)
+
+
+def test_cli_install_completion_flag_exists():
+    """add_completion=True exposes --install-completion on the root app."""
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    assert "--install-completion" in _strip_ansi(result.stdout)

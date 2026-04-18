@@ -44,6 +44,8 @@ mergers sync --force
 | `mergers status` | Version, generation time, and age of the local cache |
 | `mergers search <query>` | Full-text search of descriptions and determinations |
 | `mergers show <id>` | Full detail on a single merger |
+| `mergers timeline <id>` | Chronological event timeline for one merger, with durations |
+| `mergers party <name>` | All mergers involving a given acquirer or target |
 | `mergers list` | Browse with filters, no query required |
 | `mergers questions [id]` | Browse questionnaire questions |
 | `mergers industries` | Breakdown of activity by ANZSIC industry |
@@ -62,7 +64,22 @@ Every command supports `--json` for machine-readable output.
 | `--phase` | `1` or `2` |
 | `--waiver` / `--no-waiver` | Waivers only / notifications only |
 | `--year` | Notification year, e.g. `2025` |
+| `--since` | Notified on or after this date (`YYYY-MM-DD`) |
+| `--until` | Notified on or before this date (`YYYY-MM-DD`) |
 | `--limit N` | Max results |
+
+`search` also accepts `--regex` to interpret the query as a Python
+regular expression instead of an FTS query. Useful for patterns FTS
+can't express (e.g. `--regex "acqui(re|sition)s?\s+of\s+shares"`).
+
+## Shell completion
+
+```bash
+mergers --install-completion   # install for your current shell
+mergers --show-completion      # print the completion script
+```
+
+Supports bash, zsh, fish and PowerShell via Typer.
 
 ## Cache
 

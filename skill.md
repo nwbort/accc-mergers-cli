@@ -35,8 +35,12 @@ need to parse results programmatically.
 | `mergers sync` | Refresh the local cache from GitHub |
 | `mergers sync --force` | Force a full re-download |
 | `mergers search <query>` | Full-text search |
+| `mergers search <pattern> --regex` | Python regex search instead of FTS |
 | `mergers show <id>` | Full detail on one merger |
 | `mergers show <id> --section reasons` | Only the ACCC's reasoning |
+| `mergers timeline <id>` | Chronological timeline (notification → determination) with durations |
+| `mergers party <name>` | All mergers involving a given acquirer or target |
+| `mergers party <name> --role acquirer` | Restrict to acquirer (or `target`) |
 | `mergers list` | Browse by filters |
 | `mergers questions` | List mergers with questionnaires |
 | `mergers questions <id>` | Questions for a specific merger |
@@ -44,8 +48,9 @@ need to parse results programmatically.
 | `mergers industries` | Activity breakdown by ANZSIC industry |
 | `mergers industries --show <name>` | Mergers within an industry |
 | `mergers stats` | Aggregate statistics |
+| `mergers --install-completion` | Install shell completion for the current shell |
 
-### Filters shared by `search` and `list`
+### Filters shared by `search`, `list`, and `party`
 
 | Flag | Values |
 |---|---|
@@ -54,7 +59,14 @@ need to parse results programmatically.
 | `--phase` | `1` or `2` |
 | `--waiver` / `--no-waiver` | Filter to waivers or notifications only |
 | `--year` | Notification year (e.g. `2025`) |
-| `--limit` | Integer result cap (default 10 for search, 50 for list) |
+| `--since` | Notified on or after this date (`YYYY-MM-DD`) |
+| `--until` | Notified on or before this date (`YYYY-MM-DD`) |
+| `--limit` | Integer result cap (default 10 for search, 50 for list/party) |
+
+`search` additionally supports `--regex`, which interprets the query as a
+Python regular expression (case-insensitive, dotall) and scans the indexed
+merger text directly. Useful when FTS tokenisation can't express the
+pattern (e.g. `--regex "acqui(re|sition)s?\s+of\s+shares"`).
 
 ### `show` sections
 
@@ -77,7 +89,12 @@ ACCC's reasoning on a given case.
 | Has the ACCC reviewed mergers in grocery retail before? | `mergers search "grocery retail" --json` |
 | What did the ACCC say about geographic markets in fuel? | `mergers search "geographic fuel" --json` then `mergers show <id> --section reasons` |
 | Show me all Phase 2 cases. | `mergers list --phase 2 --json` |
+| Mergers notified in the first half of 2025? | `mergers list --since 2025-01-01 --until 2025-06-30 --json` |
 | Fuel-sector waivers in 2024? | `mergers list --industry fuel --waiver --year 2024 --json` |
+| How long did a specific merger take? | `mergers timeline MN-01016 --json` |
+| Has a particular company been acquiring other businesses? | `mergers party "Asahi" --json` |
+| Has the ACCC reviewed any deal where a given company was the target? | `mergers party "<name>" --role target --json` |
+| Find references to a very specific phrase FTS can't tokenise well. | `mergers search "<regex>" --regex --json` |
 | What questions did the ACCC ask in the Ampol merger? | `mergers questions MN-01019` |
 | Which mergers had questionnaires asking about geographic markets? | `mergers questions --search "geographic market" --json` |
 | What industries see the most merger scrutiny? | `mergers industries --json` |

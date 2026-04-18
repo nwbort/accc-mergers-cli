@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -233,6 +234,8 @@ class SearchFilters:
     phase: int | None = None
     waiver: bool | None = None
     year: int | None = None
+    since: str | None = None
+    until: str | None = None
     limit: int = 10
 
 
@@ -274,6 +277,16 @@ def _apply_filters(
             "CAST(substr(m.notification_date, 1, 4) AS INTEGER) = ?"
         )
         params.append(filters.year)
+    if filters.since is not None:
+        extra_where.append(
+            "m.notification_date IS NOT NULL AND substr(m.notification_date, 1, 10) >= ?"
+        )
+        params.append(filters.since)
+    if filters.until is not None:
+        extra_where.append(
+            "m.notification_date IS NOT NULL AND substr(m.notification_date, 1, 10) <= ?"
+        )
+        params.append(filters.until)
 
 
 def search(
@@ -437,3 +450,87 @@ def count_mergers(conn: sqlite3.Connection) -> int:
 def iter_all_mergers(conn: sqlite3.Connection) -> Iterable[Merger]:
     for row in conn.execute("SELECT raw_json FROM mergers"):
         yield Merger.from_dict(json.loads(row["raw_json"]))
+
+
+def mergers_by_party(
+    conn: sqlite3.Connection,
+    name: str,
+    filters: SearchFilters | None = None,
+    role: str | None = None,
+) -> list[sqlite3.Row]:
+    """Return mergers where the acquirer or target name contains ``name``.
+
+    ``role`` may be "acquirer", "target", or ``None`` for either side.
+    """
+    filters = filters or SearchFilters(limit=100)
+    extra_where: list[str] = []
+    params: list[Any] = []
+    _apply_filters(filters, extra_where, params)
+
+    needle = f"%{name.lower()}%"
+    if role == "acquirer":
+        extra_where.append("LOWER(m.acquirers_text) LIKE ?")
+        params.append(needle)
+    elif role == "target":
+        extra_where.append("LOWER(m.targets_text) LIKE ?")
+        params.append(needle)
+    else:
+        extra_where.append(
+            "(LOWER(m.acquirers_text) LIKE ? OR LOWER(m.targets_text) LIKE ?)"
+        )
+        params.extend([needle, needle])
+
+    where = " WHERE " + " AND ".join(extra_where)
+    sql = (
+        f"SELECT m.* FROM mergers m{where} "
+        "ORDER BY m.notification_date DESC LIMIT ?"
+    )
+    params.append(filters.limit)
+    return conn.execute(sql, params).fetchall()
+
+
+def search_regex(
+    conn: sqlite3.Connection,
+    pattern: re.Pattern[str],
+    filters: SearchFilters,
+) -> list[sqlite3.Row]:
+    """Scan indexed merger text with a Python regex.
+
+    Bypasses FTS — applies structured filters via SQL, then tests the
+    compiled pattern against the content columns. Ordering follows
+    ``notification_date DESC``.
+    """
+    extra_where: list[str] = []
+    params: list[Any] = []
+    _apply_filters(filters, extra_where, params)
+    where = ""
+    if extra_where:
+        where = " WHERE " + " AND ".join(extra_where)
+    sql = f"""
+        SELECT m.*, mc.merger_description, mc.determination_reasons,
+               mc.determination_overlap, mc.all_determination_text
+        FROM mergers m
+        LEFT JOIN merger_content mc ON mc.merger_id = m.merger_id
+        {where}
+        ORDER BY m.notification_date DESC
+    """
+    rows = conn.execute(sql, params).fetchall()
+
+    matches: list[sqlite3.Row] = []
+    for row in rows:
+        haystack_parts = [
+            row["merger_name"] or "",
+            row["acquirers_text"] or "",
+            row["targets_text"] or "",
+            row["industries_text"] or "",
+            row["merger_description"] or "",
+            row["determination_reasons"] or "",
+            row["determination_overlap"] or "",
+            row["all_determination_text"] or "",
+        ]
+        haystack = "\n".join(haystack_parts)
+        if pattern.search(haystack):
+            matches.append(row)
+            if len(matches) >= filters.limit:
+                break
+    return matches
