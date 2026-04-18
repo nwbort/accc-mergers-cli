@@ -317,6 +317,9 @@ def timeline(
     json_output: bool = typer.Option(
         False, "--json", help="Output the timeline as JSON."
     ),
+    detail: bool = typer.Option(
+        False, "--detail", help="Show the detail column for each event."
+    ),
 ) -> None:
     """Show a chronological timeline for a single merger."""
     _auto_sync_if_needed()
@@ -349,7 +352,7 @@ def timeline(
         )
         return
 
-    display.show_timeline(merger)
+    display.show_timeline(merger, show_detail=detail)
 
 
 @app.command()
