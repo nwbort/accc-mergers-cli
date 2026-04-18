@@ -45,22 +45,22 @@ def write_fixture_tree(root: Path) -> None:
                 "determination_table_content": [
                     {
                         "item": "Notified acquisition",
-                        "content": "Asahi lease of the Deer Park warehouse site.",
+                        "details": "Asahi lease of the Deer Park warehouse site.",
                     },
                     {
                         "item": "Determination",
-                        "content": "The ACCC does not propose to oppose the acquisition.",
+                        "details": "The ACCC does not propose to oppose the acquisition.",
                     },
                     {
                         "item": "Overlap and relationship between the parties",
-                        "content": (
+                        "details": (
                             "The parties overlap in the supply of beverage "
                             "warehousing services in south-eastern Australia."
                         ),
                     },
                     {
                         "item": "Reasons for determination",
-                        "content": (
+                        "details": (
                             "The ACCC considered the geographic scope of the "
                             "warehouse market and concluded there would be "
                             "sufficient alternative logistics providers "
@@ -71,7 +71,7 @@ def write_fixture_tree(root: Path) -> None:
             }
         ],
         "comments": [
-            {"text": "A routine clearance of a vertical logistics transaction.", "tags": ["routine"]}
+            {"commentary": "A routine clearance of a vertical logistics transaction.", "tags": ["routine"]}
         ],
     }
     (root / "mergers" / "MN-01016.json").write_text(json.dumps(mn_01016))
@@ -103,7 +103,7 @@ def write_fixture_tree(root: Path) -> None:
                 "determination_table_content": [
                     {
                         "item": "Reasons for determination",
-                        "content": (
+                        "details": (
                             "The ACCC identified competition concerns in the "
                             "supply of several oncology pharmaceutical products."
                         ),
@@ -112,7 +112,7 @@ def write_fixture_tree(root: Path) -> None:
             }
         ],
         "comments": [
-            {"text": "Landmark pharmaceutical transaction.", "tags": ["landmark"]}
+            {"commentary": "Landmark pharmaceutical transaction.", "tags": ["landmark"]}
         ],
     }
     (root / "mergers" / "MN-01017.json").write_text(json.dumps(mn_01017))
@@ -143,7 +143,7 @@ def write_fixture_tree(root: Path) -> None:
                 "determination_table_content": [
                     {
                         "item": "Reasons for determination",
-                        "content": (
+                        "details": (
                             "The ACCC granted the waiver having regard to the "
                             "geographic distance between the acquired sites "
                             "and other Ampol retail outlets."

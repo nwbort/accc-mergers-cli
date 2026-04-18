@@ -43,7 +43,7 @@ class DeterminationSection:
     def from_dict(cls, data: dict[str, Any]) -> "DeterminationSection":
         return cls(
             item=data.get("item", "") or "",
-            content=data.get("content", "") or "",
+            content=data.get("details") or data.get("content", "") or "",
         )
 
 
@@ -80,7 +80,7 @@ class Comment:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Comment":
         return cls(
-            text=data.get("text") or data.get("comment") or "",
+            text=data.get("commentary") or data.get("text") or data.get("comment") or "",
             tags=list(data.get("tags") or []),
             author=data.get("author"),
             date=data.get("date"),

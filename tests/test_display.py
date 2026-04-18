@@ -45,8 +45,10 @@ def test_show_merger_contains_sections(populated_db, capsys):
     output = _strip_ansi(capsys.readouterr().out)
     assert "MN-01016" in output
     assert "Reasons for determination" in output
+    assert "sufficient alternative logistics providers" in output
     assert "Parties" in output
     assert "Questionnaire" in output
+    assert "routine clearance" in output
 
 
 def test_cli_search_json(populated_db):
