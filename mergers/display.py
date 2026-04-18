@@ -102,12 +102,7 @@ def show_merger(merger: Merger, questionnaire: Questionnaire | None, section: st
     header_lines = [
         f"[bold cyan]{merger.merger_id}[/] — [bold]{merger.merger_name}[/]",
     ]
-    determination = (
-        merger.accc_determination
-        or merger.phase_2_determination
-        or merger.phase_1_determination
-        or "Pending"
-    )
+    determination = merger.outcome() or "Pending"
     header_lines.append(
         f"Status: {merger.status or '—'}   "
         f"Stage: {merger.stage or '—'}   "

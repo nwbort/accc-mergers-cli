@@ -102,6 +102,39 @@ def test_cli_questions_search(populated_db):
     assert payload[0]["merger_id"] == "MN-01016"
 
 
+def test_phase2_merger_outcome_is_pending(populated_db):
+    """MN-01017 is in Phase 2 with only a phase_1 referral — outcome must be Pending."""
+    conn = db.connect()
+    try:
+        merger = db.get_merger(conn, "MN-01017")
+    finally:
+        conn.close()
+    assert merger is not None
+    assert merger.outcome() is None  # None → displayed as Pending
+
+    # Also verify the DB determination column is NULL for list view
+    conn = db.connect()
+    try:
+        row = conn.execute(
+            "SELECT determination FROM mergers WHERE merger_id = 'MN-01017'"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row["determination"] is None
+
+
+def test_phase1_referred_to_phase2_preserves_determination():
+    """A phase 1 merger that was referred but NOT yet in phase 2 keeps its determination."""
+    from mergers.models import Merger
+    m = Merger(
+        merger_id="TEST-001",
+        merger_name="Test",
+        stage="Phase 1",
+        phase_1_determination="Referred to Phase 2",
+    )
+    assert m.outcome() == "Referred to Phase 2"
+
+
 def test_cli_stats(populated_db):
     result = runner.invoke(app, ["stats", "--json"])
     assert result.exit_code == 0, result.output

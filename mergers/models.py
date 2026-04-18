@@ -159,6 +159,21 @@ class Merger:
         except ValueError:
             return None
 
+    def outcome(self) -> str | None:
+        """Return the effective outcome for display.
+
+        When a merger is actively in Phase 2 (stage says "Phase 2"), the
+        Phase 1 determination of "Referred to Phase 2" is no longer meaningful
+        as an outcome — the merger is pending a Phase 2 result.
+        """
+        if self.accc_determination:
+            return self.accc_determination
+        if self.phase_2_determination:
+            return self.phase_2_determination
+        if "phase 2" in (self.stage or "").lower():
+            return None
+        return self.phase_1_determination or None
+
     def phase_number(self) -> int | None:
         stage = (self.stage or "").lower()
         if "phase 2" in stage:
