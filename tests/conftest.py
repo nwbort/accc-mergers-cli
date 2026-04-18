@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from mergers import db, sync
-from tests.fixtures import write_fixture_tree
+from tests.fixtures import write_bundle_tree
 
 
 @pytest.fixture
@@ -26,15 +26,16 @@ def temp_cache(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def fixture_tree(tmp_path: Path) -> Path:
-    root = tmp_path / "data"
-    write_fixture_tree(root)
+def fixture_tree(tmp_path: Path, monkeypatch) -> Path:
+    root = tmp_path / "cli-data"
+    write_bundle_tree(root)
+    monkeypatch.setenv(sync.BASE_URL_ENV, root.as_uri())
     return root
 
 
 @pytest.fixture
 def populated_db(temp_cache, fixture_tree):
-    summary = sync.persist_from_local_dir(fixture_tree)
-    assert summary["mergers"] == 3
-    sync.write_last_sync()
+    result = sync.sync()
+    assert result.mergers == 3
+    assert result.changed is True
     return temp_cache

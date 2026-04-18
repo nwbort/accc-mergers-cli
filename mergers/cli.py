@@ -7,14 +7,7 @@ from dataclasses import asdict
 from typing import Optional
 
 import typer
-from rich.progress import (
-    BarColumn,
-    Progress,
-    SpinnerColumn,
-    TaskProgressColumn,
-    TextColumn,
-    TimeElapsedColumn,
-)
+from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from . import db, display, sync
 from .db import SearchFilters
@@ -45,49 +38,80 @@ def _auto_sync_if_needed() -> None:
     _run_sync()
 
 
-def _run_sync(force: bool = False) -> dict[str, int]:
+def _run_sync(force: bool = False) -> sync.SyncResult:
     c = display.console()
-    if not force and sync.is_cache_fresh():
-        c.print("[green]Cache is already fresh.[/]")
-        conn = _with_connection()
-        try:
-            count = db.count_mergers(conn)
-        finally:
-            conn.close()
-        return {"mergers": count, "questionnaires": 0}
-
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TaskProgressColumn(),
-        TimeElapsedColumn(),
         transient=True,
     ) as progress:
-        task_id = progress.add_task("Downloading mergers", total=None)
+        task_id = progress.add_task("Syncing merger data", total=None)
+        try:
+            result = sync.sync(force=force)
+        except sync.SyncError as exc:
+            progress.remove_task(task_id)
+            c.print(f"[red]Sync failed:[/] {exc}")
+            raise typer.Exit(code=1)
 
-        def update(completed: int, total: int) -> None:
-            if progress.tasks[0].total != total:
-                progress.update(task_id, total=total)
-            progress.update(task_id, completed=completed)
-
-        summary = sync.sync(progress_cb=update)
-
+    manifest = result.manifest
+    if result.changed:
+        c.print(
+            f"[green]Indexed {result.mergers} mergers "
+            f"and {result.questionnaires} questionnaires.[/]"
+        )
+    else:
+        c.print("[green]Local index already up to date.[/]")
     c.print(
-        f"[green]Indexed {summary['mergers']} mergers "
-        f"and {summary['questionnaires']} questionnaires.[/]"
+        f"[dim]Bundle version {manifest.get('version')} · "
+        f"generated {manifest.get('generated_at')}[/]"
     )
-    return summary
+    return result
 
 
 @app.command(name="sync")
 def sync_cmd(
     force: bool = typer.Option(
-        False, "--force", help="Re-download even if the cache is fresh."
+        False, "--force", help="Skip the hash check and re-download + reindex."
     ),
 ) -> None:
     """Download and index the latest data from GitHub."""
     _run_sync(force=force)
+
+
+@app.command(name="status")
+def status_cmd() -> None:
+    """Show the version, generation time and age of the local cache."""
+    c = display.console()
+    if not sync.cache_exists():
+        c.print("[yellow]No local cache. Run `mergers sync` first.[/]")
+        raise typer.Exit(code=1)
+
+    manifest = sync.read_cached_manifest()
+    conn = _with_connection()
+    try:
+        merger_count = db.count_mergers(conn)
+    finally:
+        conn.close()
+
+    age_days = sync.cache_age_days()
+    age_display = f"{age_days:.1f} days ago" if age_days is not None else "—"
+
+    if manifest:
+        c.print(f"Bundle version: [bold]{manifest.get('version', '—')}[/]")
+        c.print(f"Generated at:   {manifest.get('generated_at', '—')}")
+        c.print(
+            f"Mergers:        {merger_count}"
+            + (
+                f" (manifest says {manifest['merger_count']})"
+                if manifest.get("merger_count") not in (None, merger_count)
+                else ""
+            )
+        )
+    else:
+        c.print("[yellow]No cached manifest found.[/]")
+        c.print(f"Mergers:        {merger_count}")
+
+    c.print(f"Last sync:      {age_display}")
 
 
 def _parse_filters(

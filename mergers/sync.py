@@ -1,158 +1,137 @@
-"""Fetch ACCC merger data from GitHub and index it locally."""
+"""Fetch ACCC merger data from GitHub and index it locally.
+
+The upstream repo (nwbort/accc-mergers) pre-generates three files under
+``data/output/cli/`` on every data update: ``cli-manifest.json``,
+``cli-bundle.json`` and ``cli-merger-manifest.json``. The CLI consumes those
+files directly instead of scraping ~200 per-merger JSONs.
+"""
 
 from __future__ import annotations
 
-import asyncio
 import datetime as dt
+import hashlib
 import json
+import os
+import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse, unquote
 
 import httpx
 
-from . import db
+from . import __version__, db
 from .models import Merger, Questionnaire
 
-BASE_URL = (
+BASE_URL_ENV = "ACCC_MERGERS_BASE_URL"
+DEFAULT_BASE_URL = (
     "https://raw.githubusercontent.com/nwbort/accc-mergers/main/"
-    "merger-tracker/frontend/public/data"
+    "data/output/cli"
 )
-INDEX_URL = f"{BASE_URL}/mergers.json"
-LIST_META_URL = f"{BASE_URL}/mergers/list-meta.json"
-LIST_PAGE_URL = f"{BASE_URL}/mergers/list-page-{{page}}.json"
-STATS_URL = f"{BASE_URL}/stats.json"
-QUESTIONNAIRE_URL = f"{BASE_URL}/questionnaires/{{merger_id}}.json"
-INDUSTRIES_URL = f"{BASE_URL}/industries.json"
-MERGER_URL = f"{BASE_URL}/mergers/{{merger_id}}.json"
 
-MAX_CONCURRENCY = 4
+MANIFEST_FILENAME = "cli-manifest.json"
+BUNDLE_FILENAME = "cli-bundle.json"
+MERGER_MANIFEST_FILENAME = "cli-merger-manifest.json"
+
 REQUEST_TIMEOUT = 30.0
+RETRY_DELAYS = (1.0, 2.0, 4.0)
+USER_AGENT = f"accc-mergers-cli/{__version__}"
+
+def manifest_cache_path() -> Path:
+    return db.CACHE_DIR / MANIFEST_FILENAME
 
 
-async def _fetch_json(client: httpx.AsyncClient, url: str) -> Any:
-    response = await client.get(url, timeout=REQUEST_TIMEOUT)
-    response.raise_for_status()
-    return response.json()
+def merger_manifest_cache_path() -> Path:
+    return db.CACHE_DIR / MERGER_MANIFEST_FILENAME
 
 
-async def _fetch_merger(
-    client: httpx.AsyncClient, semaphore: asyncio.Semaphore, merger_id: str
-) -> dict[str, Any] | None:
-    async with semaphore:
+class SyncError(RuntimeError):
+    """Raised when a sync cannot be completed."""
+
+
+@dataclass
+class SyncResult:
+    manifest: dict[str, Any]
+    changed: bool
+    mergers: int
+    questionnaires: int
+
+
+def base_url() -> str:
+    return os.environ.get(BASE_URL_ENV) or DEFAULT_BASE_URL
+
+
+def _join_url(base: str, name: str) -> str:
+    if base.startswith(("http://", "https://", "file://")):
+        return f"{base.rstrip('/')}/{name}"
+    return str(Path(base) / name)
+
+
+def _is_http(url: str) -> bool:
+    return url.startswith(("http://", "https://"))
+
+
+def _local_path(url: str) -> Path | None:
+    if url.startswith("file://"):
+        parsed = urlparse(url)
+        return Path(unquote(parsed.path))
+    if not _is_http(url):
+        return Path(url)
+    return None
+
+
+def _fetch_bytes(client: httpx.Client | None, url: str) -> bytes:
+    local = _local_path(url)
+    if local is not None:
+        if not local.exists():
+            raise SyncError(f"File not found: {local}")
+        return local.read_bytes()
+
+    assert client is not None, "HTTP client required for remote URLs"
+    last_exc: Exception | None = None
+    attempts = len(RETRY_DELAYS) + 1
+    for attempt in range(attempts):
         try:
-            return await _fetch_json(client, MERGER_URL.format(merger_id=merger_id))
-        except httpx.HTTPError:
-            return None
+            response = client.get(url, timeout=REQUEST_TIMEOUT)
+            if response.status_code == 404:
+                raise SyncError(f"Not found: {url}")
+            response.raise_for_status()
+            return response.content
+        except SyncError:
+            raise
+        except httpx.HTTPError as exc:
+            last_exc = exc
+            if attempt < attempts - 1:
+                time.sleep(RETRY_DELAYS[attempt])
+    raise SyncError(f"Failed to fetch {url}: {last_exc}") from last_exc
 
 
-async def _fetch_questionnaire(
-    client: httpx.AsyncClient, semaphore: asyncio.Semaphore, merger_id: str
-) -> tuple[str, dict[str, Any] | None]:
-    async with semaphore:
-        data = await _safe_fetch(client, QUESTIONNAIRE_URL.format(merger_id=merger_id))
-        return merger_id, data if isinstance(data, dict) else None
+def _make_client(base: str) -> httpx.Client | None:
+    if not _is_http(base):
+        return None
+    return httpx.Client(
+        headers={"User-Agent": USER_AGENT},
+        follow_redirects=True,
+    )
 
 
-async def _fetch_all_merger_ids(client: httpx.AsyncClient) -> list[str]:
-    """Return every merger ID published by the tracker.
-
-    Uses the paginated ``mergers/list-page-N.json`` index when available, since
-    ``mergers.json`` only contains the subset of notifications surfaced on the
-    landing page and omits waiver (``WA-*``) records entirely.
-    """
-    ids: list[str] = []
-    seen: set[str] = set()
-
-    meta = await _safe_fetch(client, LIST_META_URL)
-    if isinstance(meta, dict):
-        total_pages = int(meta.get("total_pages") or 0)
-        for page in range(1, total_pages + 1):
-            page_data = await _safe_fetch(client, LIST_PAGE_URL.format(page=page))
-            for mid in _extract_merger_ids(page_data):
-                if mid not in seen:
-                    seen.add(mid)
-                    ids.append(mid)
-
-    if not ids:
-        index_data = await _fetch_json(client, INDEX_URL)
-        for mid in _extract_merger_ids(index_data):
-            if mid not in seen:
-                seen.add(mid)
-                ids.append(mid)
-
-    return ids
-
-
-async def _download_all(progress_cb=None) -> dict[str, Any]:
-    """Download the index, individual mergers, stats, questionnaires, and industries."""
-    async with httpx.AsyncClient(follow_redirects=True) as client:
-        merger_ids = await _fetch_all_merger_ids(client)
-
-        semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
-        total = len(merger_ids)
-        completed = 0
-        mergers: list[dict[str, Any]] = []
-
-        async def fetch_one(mid: str) -> None:
-            nonlocal completed
-            data = await _fetch_merger(client, semaphore, mid)
-            completed += 1
-            if progress_cb:
-                progress_cb(completed, total)
-            if data:
-                mergers.append(data)
-
-        await asyncio.gather(*(fetch_one(mid) for mid in merger_ids))
-
-        stats = await _safe_fetch(client, STATS_URL)
-        industries = await _safe_fetch(client, INDUSTRIES_URL)
-
-        q_ids = [
-            m["merger_id"]
-            for m in mergers
-            if m.get("has_questionnaire") and m.get("merger_id")
-        ]
-        q_results = await asyncio.gather(
-            *(_fetch_questionnaire(client, semaphore, mid) for mid in q_ids)
-        )
-        questionnaires = {mid: data for mid, data in q_results if data is not None}
-
-        return {
-            "mergers": mergers,
-            "stats": stats,
-            "questionnaires": questionnaires,
-            "industries": industries,
-        }
-
-
-async def _safe_fetch(client: httpx.AsyncClient, url: str) -> Any:
+def _read_cached_manifest() -> dict[str, Any] | None:
+    if not manifest_cache_path().exists():
+        return None
     try:
-        return await _fetch_json(client, url)
-    except httpx.HTTPError:
+        return json.loads(manifest_cache_path().read_text())
+    except (ValueError, OSError):
         return None
 
 
-def _extract_merger_ids(index_data: Any) -> list[str]:
-    if isinstance(index_data, list):
-        items = index_data
-    elif isinstance(index_data, dict):
-        items = (
-            index_data.get("mergers")
-            or index_data.get("items")
-            or index_data.get("data")
-            or []
-        )
-    else:
-        items = []
-    ids: list[str] = []
-    for item in items:
-        if isinstance(item, str):
-            ids.append(item)
-        elif isinstance(item, dict):
-            merger_id = item.get("merger_id") or item.get("id")
-            if merger_id:
-                ids.append(str(merger_id))
-    return ids
+def _write_cached_manifest(raw: bytes) -> None:
+    db.ensure_cache_dir()
+    manifest_cache_path().write_bytes(raw)
+
+
+def _write_cached_merger_manifest(raw: bytes) -> None:
+    db.ensure_cache_dir()
+    merger_manifest_cache_path().write_bytes(raw)
 
 
 def is_cache_fresh() -> bool:
@@ -186,13 +165,111 @@ def write_last_sync(ts: dt.datetime | None = None) -> None:
     db.LAST_SYNC_PATH.write_text(ts.isoformat())
 
 
-def sync(progress_cb=None) -> dict[str, int]:
-    """Download everything and rebuild the local cache. Returns summary counts."""
-    data = asyncio.run(_download_all(progress_cb=progress_cb))
-    return _persist(data)
+def read_cached_manifest() -> dict[str, Any] | None:
+    """Public accessor used by the `status` command."""
+    return _read_cached_manifest()
 
 
-def _persist(data: dict[str, Any]) -> dict[str, int]:
+def _require_manifest_fields(manifest: dict[str, Any]) -> None:
+    missing = [
+        k
+        for k in ("version", "generated_at", "merger_count", "bundle_sha256")
+        if k not in manifest
+    ]
+    if missing:
+        raise SyncError(
+            f"Manifest missing required fields: {', '.join(missing)}"
+        )
+
+
+def sync(force: bool = False) -> SyncResult:
+    """Run the full manifest/bundle sync flow.
+
+    Fetches ``cli-manifest.json`` first; if the bundle hash matches the
+    locally cached manifest and ``force`` is False, the local index is
+    already up to date. Otherwise fetches and verifies ``cli-bundle.json``,
+    rebuilds the SQLite index, and updates the cached manifest.
+    """
+    base = base_url()
+    manifest_url = _join_url(base, MANIFEST_FILENAME)
+    bundle_url = _join_url(base, BUNDLE_FILENAME)
+    merger_manifest_url = _join_url(base, MERGER_MANIFEST_FILENAME)
+
+    client = _make_client(base)
+    try:
+        manifest_bytes = _fetch_bytes(client, manifest_url)
+        try:
+            manifest = json.loads(manifest_bytes)
+        except ValueError as exc:
+            raise SyncError(f"Manifest is not valid JSON: {exc}") from exc
+        _require_manifest_fields(manifest)
+
+        cached = _read_cached_manifest()
+        cached_sha = cached.get("bundle_sha256") if cached else None
+        if (
+            not force
+            and cached_sha == manifest["bundle_sha256"]
+            and db.DB_PATH.exists()
+        ):
+            _write_cached_manifest(manifest_bytes)
+            write_last_sync()
+            conn = db.connect()
+            try:
+                merger_count = db.count_mergers(conn)
+            finally:
+                conn.close()
+            return SyncResult(
+                manifest=manifest,
+                changed=False,
+                mergers=merger_count,
+                questionnaires=0,
+            )
+
+        bundle_bytes = _fetch_bytes(client, bundle_url)
+        actual_sha = hashlib.sha256(bundle_bytes).hexdigest()
+        if actual_sha != manifest["bundle_sha256"]:
+            raise SyncError(
+                "Bundle hash mismatch: manifest expected "
+                f"{manifest['bundle_sha256']}, got {actual_sha}"
+            )
+
+        try:
+            bundle = json.loads(bundle_bytes)
+        except ValueError as exc:
+            raise SyncError(f"Bundle is not valid JSON: {exc}") from exc
+
+        mergers_list = bundle.get("mergers") or []
+        if len(mergers_list) != manifest["merger_count"]:
+            raise SyncError(
+                "Bundle merger count mismatch: manifest expected "
+                f"{manifest['merger_count']}, bundle has {len(mergers_list)}"
+            )
+
+        summary = _persist(bundle)
+
+        try:
+            mm_bytes = _fetch_bytes(client, merger_manifest_url)
+        except SyncError:
+            mm_bytes = None
+        if mm_bytes is not None:
+            expected = manifest.get("merger_manifest_sha256")
+            if expected is None or hashlib.sha256(mm_bytes).hexdigest() == expected:
+                _write_cached_merger_manifest(mm_bytes)
+
+        _write_cached_manifest(manifest_bytes)
+        write_last_sync()
+        return SyncResult(
+            manifest=manifest,
+            changed=True,
+            mergers=summary["mergers"],
+            questionnaires=summary["questionnaires"],
+        )
+    finally:
+        if client is not None:
+            client.close()
+
+
+def _persist(bundle: dict[str, Any]) -> dict[str, int]:
     db.ensure_cache_dir()
     conn = db.connect()
     try:
@@ -200,14 +277,14 @@ def _persist(data: dict[str, Any]) -> dict[str, int]:
         db.clear_mergers(conn)
 
         merger_count = 0
-        for merger_dict in data.get("mergers") or []:
+        for merger_dict in bundle.get("mergers") or []:
             merger = Merger.from_dict(merger_dict)
             if not merger.merger_id:
                 continue
             db.insert_merger(conn, merger)
             merger_count += 1
 
-        questionnaires = data.get("questionnaires") or {}
+        questionnaires = bundle.get("questionnaires") or {}
         q_count = 0
         if isinstance(questionnaires, dict):
             for mid, q_data in questionnaires.items():
@@ -217,54 +294,22 @@ def _persist(data: dict[str, Any]) -> dict[str, int]:
                 db.insert_questionnaire(conn, q)
                 q_count += 1
 
-        if data.get("stats") is not None:
-            db.set_stats(conn, data["stats"])
-        if data.get("industries") is not None:
-            db.set_industries(conn, data["industries"])
+        stats = bundle.get("stats")
+        if stats is not None:
+            db.set_stats(conn, stats)
+        industries = bundle.get("industries")
+        if industries is not None:
+            db.set_industries(conn, industries)
 
         conn.commit()
     finally:
         conn.close()
 
-    write_last_sync()
     return {"mergers": merger_count, "questionnaires": q_count}
 
 
-def ensure_cache(progress_cb=None) -> dict[str, int] | None:
-    """If no cache exists, run an initial sync and return the summary."""
+def ensure_cache() -> SyncResult | None:
+    """If no cache exists, run an initial sync and return the result."""
     if cache_exists():
         return None
-    return sync(progress_cb=progress_cb)
-
-
-def load_json_file(path: Path) -> Any:
-    return json.loads(path.read_text())
-
-
-def persist_from_local_dir(root: Path) -> dict[str, int]:
-    """Testing helper: load data from a local directory mirroring the GitHub layout."""
-    index = load_json_file(root / "mergers.json")
-    merger_ids = _extract_merger_ids(index)
-    mergers: list[dict[str, Any]] = []
-    for mid in merger_ids:
-        path = root / "mergers" / f"{mid}.json"
-        if path.exists():
-            mergers.append(load_json_file(path))
-
-    stats_path = root / "stats.json"
-    questionnaires_path = root / "questionnaire_data.json"
-    industries_path = root / "industries.json"
-
-    data = {
-        "mergers": mergers,
-        "stats": load_json_file(stats_path) if stats_path.exists() else None,
-        "questionnaires": (
-            load_json_file(questionnaires_path)
-            if questionnaires_path.exists()
-            else None
-        ),
-        "industries": (
-            load_json_file(industries_path) if industries_path.exists() else None
-        ),
-    }
-    return _persist(data)
+    return sync()

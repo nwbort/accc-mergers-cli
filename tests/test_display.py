@@ -162,3 +162,19 @@ def test_cli_stats(populated_db):
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["totals"]["total_mergers"] == 3
+
+
+def test_cli_status_reports_version_and_counts(populated_db):
+    result = runner.invoke(app, ["status"])
+    assert result.exit_code == 0, result.output
+    output = _strip_ansi(result.stdout)
+    assert "Bundle version" in output
+    assert "Generated at" in output
+    assert "Mergers" in output
+    assert "3" in output
+
+
+def test_cli_status_without_cache(temp_cache):
+    result = runner.invoke(app, ["status"])
+    assert result.exit_code != 0
+    assert "No local cache" in _strip_ansi(result.stdout)

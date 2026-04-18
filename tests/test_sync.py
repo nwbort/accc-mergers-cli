@@ -1,11 +1,16 @@
-"""Tests for the local-directory ingestion path used by sync."""
+"""Tests for the manifest + bundle sync path."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
 from mergers import db, sync
+from tests.fixtures import write_bundle_tree
 
 
-def test_persist_from_local_dir_indexes_everything(populated_db):
+def test_sync_indexes_everything_from_bundle(populated_db):
     conn = db.connect()
     try:
         assert db.count_mergers(conn) == 3
@@ -22,20 +27,91 @@ def test_persist_from_local_dir_indexes_everything(populated_db):
 
 
 def test_sync_writes_last_sync_timestamp(populated_db):
-    # persist_from_local_dir doesn't touch last_sync; write_last_sync does.
-    sync.write_last_sync()
     assert db.LAST_SYNC_PATH.exists()
     assert sync.cache_exists()
     assert sync.is_cache_fresh() is True
 
 
-def test_extract_merger_ids_from_list_of_dicts():
-    ids = sync._extract_merger_ids(
-        [{"merger_id": "MN-1"}, {"id": "MN-2"}, "MN-3"]
-    )
-    assert ids == ["MN-1", "MN-2", "MN-3"]
+def test_sync_caches_manifest_and_merger_manifest(populated_db):
+    assert sync.manifest_cache_path().exists()
+    assert sync.merger_manifest_cache_path().exists()
+    cached = sync.read_cached_manifest()
+    assert cached is not None
+    assert cached["merger_count"] == 3
+    assert "bundle_sha256" in cached
 
 
-def test_extract_merger_ids_from_wrapped_dict():
-    ids = sync._extract_merger_ids({"mergers": [{"merger_id": "MN-9"}]})
-    assert ids == ["MN-9"]
+def test_second_sync_is_a_noop(temp_cache, fixture_tree):
+    first = sync.sync()
+    assert first.changed is True
+
+    second = sync.sync()
+    assert second.changed is False
+    assert second.mergers == 3
+    assert second.manifest["bundle_sha256"] == first.manifest["bundle_sha256"]
+
+
+def test_force_sync_reindexes_even_when_hash_matches(temp_cache, fixture_tree):
+    first = sync.sync()
+    assert first.changed is True
+
+    forced = sync.sync(force=True)
+    assert forced.changed is True
+    assert forced.mergers == 3
+
+
+def test_sync_rejects_bundle_with_bad_hash(temp_cache, tmp_path, monkeypatch):
+    root = tmp_path / "corrupt"
+    write_bundle_tree(root, corrupt_bundle=True)
+    monkeypatch.setenv(sync.BASE_URL_ENV, root.as_uri())
+
+    with pytest.raises(sync.SyncError, match="hash mismatch"):
+        sync.sync()
+
+    # The index must not have been written.
+    assert not db.DB_PATH.exists()
+
+
+def test_sync_rejects_bundle_with_wrong_count(temp_cache, tmp_path, monkeypatch):
+    root = tmp_path / "badcount"
+    write_bundle_tree(root, fake_merger_count=999)
+    monkeypatch.setenv(sync.BASE_URL_ENV, root.as_uri())
+
+    with pytest.raises(sync.SyncError, match="merger count mismatch"):
+        sync.sync()
+
+
+def test_sync_tolerates_null_stats_and_industries(temp_cache, tmp_path, monkeypatch):
+    root = tmp_path / "nulls"
+    write_bundle_tree(root, stats=None, industries=None)
+    monkeypatch.setenv(sync.BASE_URL_ENV, root.as_uri())
+
+    result = sync.sync()
+    assert result.changed is True
+    assert result.mergers == 3
+
+    conn = db.connect()
+    try:
+        assert db.get_stats(conn) is None
+        assert db.get_industries(conn) is None
+    finally:
+        conn.close()
+
+
+def test_sync_missing_manifest_is_hard_error(temp_cache, tmp_path, monkeypatch):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    monkeypatch.setenv(sync.BASE_URL_ENV, empty.as_uri())
+
+    with pytest.raises(sync.SyncError, match="[Nn]ot found|File not found"):
+        sync.sync()
+
+
+def test_base_url_default_when_env_unset(monkeypatch):
+    monkeypatch.delenv(sync.BASE_URL_ENV, raising=False)
+    assert sync.base_url() == sync.DEFAULT_BASE_URL
+
+
+def test_base_url_env_override(monkeypatch):
+    monkeypatch.setenv(sync.BASE_URL_ENV, "https://example.com/cli")
+    assert sync.base_url() == "https://example.com/cli"
