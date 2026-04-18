@@ -79,6 +79,13 @@ def test_cli_list_phase2(populated_db):
     assert [r["merger_id"] for r in payload] == ["MN-01017"]
 
 
+def test_cli_list_phase0_means_waivers(populated_db):
+    result = runner.invoke(app, ["list", "--phase", "0", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert [r["merger_id"] for r in payload] == ["MN-01019"]
+
+
 def test_cli_industries_json(populated_db):
     result = runner.invoke(app, ["industries", "--json"])
     assert result.exit_code == 0, result.output
