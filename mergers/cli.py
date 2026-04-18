@@ -188,7 +188,9 @@ def search(
 
 @app.command()
 def show(
-    merger_id: str = typer.Argument(..., help="Merger ID, e.g. MN-01016"),
+    merger_id: str = typer.Argument(
+        ..., help="Merger ID, e.g. MN-01016 (also accepts 'mn 01016')."
+    ),
     section: str = typer.Option(
         "all",
         "--section",

@@ -97,6 +97,25 @@ def test_industry_breakdown_counts(populated_db):
     assert by_name["Pharmaceutical Product Manufacturing"]["phase2"] == 1
 
 
+def test_get_merger_accepts_lowercase_and_space(populated_db):
+    conn = db.connect()
+    try:
+        assert db.get_merger(conn, "mn-01016").merger_id == "MN-01016"
+        assert db.get_merger(conn, "mn 01016").merger_id == "MN-01016"
+        assert db.get_merger(conn, "  MN 01016  ").merger_id == "MN-01016"
+    finally:
+        conn.close()
+
+
+def test_get_questionnaire_accepts_lowercase_and_space(populated_db):
+    conn = db.connect()
+    try:
+        assert db.get_questionnaire(conn, "mn-01016").merger_id == "MN-01016"
+        assert db.get_questionnaire(conn, "mn 01016").merger_id == "MN-01016"
+    finally:
+        conn.close()
+
+
 def test_search_questions(populated_db):
     conn = db.connect()
     try:
