@@ -194,7 +194,10 @@ def show(
     section: str = typer.Option(
         "all",
         "--section",
-        help="all | reasons | overlap | parties | determination",
+        help=(
+            "all | determination (full determination content) | reasons | overlap"
+            " | parties | industries | description | questionnaire"
+        ),
     ),
     json_output: bool = typer.Option(
         False, "--json", help="Output raw merger JSON."
@@ -203,7 +206,16 @@ def show(
     """Display full detail on a single merger."""
     _auto_sync_if_needed()
 
-    allowed = {"all", "reasons", "overlap", "parties", "determination"}
+    allowed = {
+        "all",
+        "reasons",
+        "overlap",
+        "parties",
+        "industries",
+        "determination",
+        "description",
+        "questionnaire",
+    }
     if section not in allowed:
         raise typer.BadParameter(f"--section must be one of {sorted(allowed)}")
 

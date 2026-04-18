@@ -116,17 +116,22 @@ def show_merger(merger: Merger, questionnaire: Questionnaire | None, section: st
     )
     c.print(Panel("\n".join(header_lines), border_style="cyan"))
 
-    if section == "all":
+    if section in ("all", "parties"):
         _render_parties(merger)
+
+    if section in ("all", "industries"):
         _render_industries(merger)
+
+    if section in ("all", "description"):
         _render_description(merger)
 
-    if section in ("all", "determination", "reasons", "overlap", "parties"):
+    if section in ("all", "determination", "reasons", "overlap"):
         _render_determination_sections(merger, section)
 
+    if section in ("all", "questionnaire") and questionnaire:
+        _render_questionnaire(questionnaire)
+
     if section == "all":
-        if questionnaire:
-            _render_questionnaire(questionnaire)
         _render_comments(merger)
 
 
@@ -176,8 +181,6 @@ def _render_determination_sections(merger: Merger, section: str) -> None:
     filter_map = {
         "reasons": "reasons for determination",
         "overlap": "overlap and relationship between the parties",
-        "parties": "parties to the acquisition",
-        "determination": "determination",
     }
     target = filter_map.get(section)
 
