@@ -102,17 +102,8 @@ def test_cli_questions_search(populated_db):
     assert payload[0]["merger_id"] == "MN-01016"
 
 
-def test_phase2_merger_outcome_is_pending(populated_db):
-    """MN-01017 is in Phase 2 with only a phase_1 referral — outcome must be Pending."""
-    conn = db.connect()
-    try:
-        merger = db.get_merger(conn, "MN-01017")
-    finally:
-        conn.close()
-    assert merger is not None
-    assert merger.outcome() is None  # None → displayed as Pending
-
-    # Also verify the DB determination column is NULL for list view
+def test_phase2_pending_db_determination_is_null(populated_db):
+    """MN-01017 is in Phase 2 with no final result — DB determination must be NULL."""
     conn = db.connect()
     try:
         row = conn.execute(
@@ -123,7 +114,36 @@ def test_phase2_merger_outcome_is_pending(populated_db):
     assert row["determination"] is None
 
 
-def test_phase1_referred_to_phase2_preserves_determination():
+def test_outcome_phase2_no_determination_is_none():
+    """In Phase 2 with only a phase_1 referral → outcome() is None (Pending)."""
+    from mergers.models import Merger
+    m = Merger(
+        merger_id="TEST-002",
+        merger_name="Test",
+        stage="Phase 2",
+        phase_1_determination="Phase 2 referral",
+        phase_2_determination=None,
+        accc_determination=None,
+    )
+    assert m.outcome() is None
+
+
+def test_outcome_phase2_cleared_returns_determination():
+    """In Phase 2 with a phase_2_determination → outcome() returns that determination."""
+    from mergers.models import Merger
+    for result in ("Approved", "Denied"):
+        m = Merger(
+            merger_id="TEST-003",
+            merger_name="Test",
+            stage="Phase 2",
+            phase_1_determination="Phase 2 referral",
+            phase_2_determination=result,
+            accc_determination=None,
+        )
+        assert m.outcome() == result
+
+
+def test_outcome_phase1_referred_to_phase2_preserves_determination():
     """A phase 1 merger that was referred but NOT yet in phase 2 keeps its determination."""
     from mergers.models import Merger
     m = Merger(
