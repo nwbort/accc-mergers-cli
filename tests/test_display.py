@@ -178,7 +178,7 @@ def test_cli_status_reports_version_and_counts(populated_db):
     assert "Bundle version" in output
     assert "Generated at" in output
     assert "Mergers" in output
-    assert "3" in output
+    assert "4" in output
 
 
 def test_cli_status_without_cache(temp_cache):

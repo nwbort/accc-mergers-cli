@@ -13,7 +13,7 @@ from tests.fixtures import write_bundle_tree
 def test_sync_indexes_everything_from_bundle(populated_db):
     conn = db.connect()
     try:
-        assert db.count_mergers(conn) == 3
+        assert db.count_mergers(conn) == 4
         merger = db.get_merger(conn, "MN-01016")
         assert merger is not None
         assert merger.merger_name.startswith("Asahi")
@@ -37,7 +37,7 @@ def test_sync_caches_manifest_and_merger_manifest(populated_db):
     assert sync.merger_manifest_cache_path().exists()
     cached = sync.read_cached_manifest()
     assert cached is not None
-    assert cached["merger_count"] == 3
+    assert cached["merger_count"] == 4
     assert "bundle_sha256" in cached
 
 
@@ -47,7 +47,7 @@ def test_second_sync_is_a_noop(temp_cache, fixture_tree):
 
     second = sync.sync()
     assert second.changed is False
-    assert second.mergers == 3
+    assert second.mergers == 4
     assert second.manifest["bundle_sha256"] == first.manifest["bundle_sha256"]
 
 
@@ -57,7 +57,7 @@ def test_force_sync_reindexes_even_when_hash_matches(temp_cache, fixture_tree):
 
     forced = sync.sync(force=True)
     assert forced.changed is True
-    assert forced.mergers == 3
+    assert forced.mergers == 4
 
 
 def test_sync_rejects_bundle_with_bad_hash(temp_cache, tmp_path, monkeypatch):
@@ -88,7 +88,7 @@ def test_sync_tolerates_null_stats_and_industries(temp_cache, tmp_path, monkeypa
 
     result = sync.sync()
     assert result.changed is True
-    assert result.mergers == 3
+    assert result.mergers == 4
 
     conn = db.connect()
     try:

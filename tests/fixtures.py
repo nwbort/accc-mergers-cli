@@ -111,6 +111,30 @@ MERGERS: list[dict[str, Any]] = [
         "has_questionnaire": False,
     },
     {
+        "merger_id": "MN-01018",
+        "merger_name": "TelstraX – Regional broadband assets",
+        "status": "Completed",
+        "stage": "Phase 1",
+        "is_waiver": False,
+        "acquirers": [{"name": "TelstraX Pty Ltd"}],
+        "targets": [{"name": "Regional Broadband Co Pty Ltd"}],
+        "anzsic_codes": [
+            {"code": "5801", "name": "Wired Telecommunications Network Operation"}
+        ],
+        "merger_description": (
+            "TelstraX proposed to acquire regional broadband infrastructure "
+            "assets from Regional Broadband Co."
+        ),
+        "accc_determination": "Not approved",
+        "phase_1_determination": "Not approved",
+        "phase_2_determination": None,
+        "effective_notification_datetime": "2025-03-10T00:00:00+10:00",
+        "determination_publication_date": "2025-04-05T00:00:00+10:00",
+        "events": [],
+        "comments": [],
+        "has_questionnaire": False,
+    },
+    {
         "merger_id": "MN-01019",
         "merger_name": "Ampol – Fuel retail sites",
         "status": "Completed",

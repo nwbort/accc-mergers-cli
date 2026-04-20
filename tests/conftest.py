@@ -36,6 +36,6 @@ def fixture_tree(tmp_path: Path, monkeypatch) -> Path:
 @pytest.fixture
 def populated_db(temp_cache, fixture_tree):
     result = sync.sync()
-    assert result.mergers == 3
+    assert result.mergers == 4
     assert result.changed is True
     return temp_cache
