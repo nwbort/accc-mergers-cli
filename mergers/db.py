@@ -244,7 +244,7 @@ def _outcome_where(outcome: str) -> tuple[str, list[Any]]:
     if outcome == "approved":
         return "LOWER(m.determination) = ?", ["approved"]
     if outcome == "denied":
-        return "LOWER(m.determination) = ?", ["denied"]
+        return "(LOWER(m.determination) = ? OR LOWER(m.determination) = ?)", ["denied", "not approved"]
     if outcome == "phase2":
         return "m.phase = ?", [2]
     if outcome == "pending":
