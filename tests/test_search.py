@@ -155,7 +155,11 @@ def test_search_filter_since_and_until(populated_db):
         )
     finally:
         conn.close()
-    assert _ids(rows) == ["MN-01017"]
+    ids = _ids(rows)
+    assert "MN-01017" in ids
+    assert "MN-01018" in ids  # 2025-03-10 is within range
+    assert "MN-01016" not in ids
+    assert "MN-01019" not in ids
 
 
 def test_search_regex_matches(populated_db):
@@ -200,6 +204,37 @@ def test_mergers_by_party_role_filter(populated_db):
         conn.close()
     assert _ids(acquirer_rows) == ["MN-01017"]
     assert target_rows == []
+
+
+def test_search_filter_outcome_denied_matches_not_approved(populated_db):
+    conn = db.connect()
+    try:
+        rows = db.list_mergers(conn, SearchFilters(outcome="denied", limit=10))
+    finally:
+        conn.close()
+    ids = _ids(rows)
+    assert "MN-01018" in ids
+
+
+def test_search_filter_outcome_denied_excludes_approved(populated_db):
+    conn = db.connect()
+    try:
+        rows = db.list_mergers(conn, SearchFilters(outcome="denied", limit=10))
+    finally:
+        conn.close()
+    ids = _ids(rows)
+    assert "MN-01016" not in ids
+    assert "MN-01019" not in ids
+    assert "MN-01017" not in ids
+
+
+def test_search_filter_outcome_approved_excludes_not_approved(populated_db):
+    conn = db.connect()
+    try:
+        rows = db.list_mergers(conn, SearchFilters(outcome="approved", limit=10))
+    finally:
+        conn.close()
+    assert "MN-01018" not in _ids(rows)
 
 
 def test_search_questions(populated_db):
