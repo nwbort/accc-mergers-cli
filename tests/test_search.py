@@ -245,3 +245,12 @@ def test_search_questions(populated_db):
         conn.close()
     assert any("geographic" in (r["question_text"] or "").lower() for r in rows)
     assert rows[0]["merger_id"] == "MN-01016"
+
+
+def test_search_questions_across_all_questionnaires(populated_db):
+    conn = db.connect()
+    try:
+        rows = db.search_questions(conn, "GenericsRUs commercial relationship")
+    finally:
+        conn.close()
+    assert any(r["merger_id"] == "MN-01017" for r in rows)

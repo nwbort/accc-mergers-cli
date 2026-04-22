@@ -466,10 +466,16 @@ def questions(
     merger_id: Optional[str] = typer.Argument(
         None, help="Merger ID. Omit to list mergers with questionnaires."
     ),
+    version: Optional[int] = typer.Argument(
+        None, help="Questionnaire version number (1 = latest). Omit for latest."
+    ),
     search_text: Optional[str] = typer.Option(
         None,
         "--search",
         help="Search question text across all mergers.",
+    ),
+    show_all: bool = typer.Option(
+        False, "--all", help="Show all questionnaire versions."
     ),
     limit: int = typer.Option(20, "--limit"),
     json_output: bool = typer.Option(False, "--json"),
@@ -499,27 +505,61 @@ def questions(
             if json_output:
                 display.print_json(asdict(q))
                 return
+
             merger = db.get_merger(conn, merger_id)
-            display.console().print(
-                f"[bold cyan]{q.merger_id}[/] — "
-                f"[bold]{merger.merger_name if merger else q.merger_name or ''}[/]"
-            )
-            display.console().print(
-                f"Deadline: {q.deadline or '—'}  |  {q.questions_count} questions\n"
-            )
-            for i, question in enumerate(q.questions, start=1):
-                number = (
-                    question.get("number")
-                    or question.get("question_number")
-                    or i
+            name = merger.merger_name if merger else q.merger_name or ""
+            c = display.console()
+
+            # Build a uniform list of version dicts.
+            # all_questionnaires is populated when the bundle contains multiple
+            # versions; otherwise the primary fields form the sole version.
+            if q.all_questionnaires:
+                versions = q.all_questionnaires
+            else:
+                versions = [
+                    {
+                        "deadline": q.deadline,
+                        "deadline_iso": q.deadline_iso,
+                        "file_name": q.file_name,
+                        "questions": q.questions,
+                        "questions_count": q.questions_count,
+                    }
+                ]
+            total = len(versions)
+
+            c.print(f"[bold cyan]{q.merger_id}[/] — [bold]{name}[/]")
+            if total > 1:
+                hint = (
+                    f"  ·  use `mergers questions {q.merger_id} 2` or `--all`"
+                    " to view others"
                 )
-                text = (
-                    question.get("text")
-                    or question.get("question")
-                    or question.get("question_text")
-                    or ""
+                c.print(f"[dim]{total} questionnaire versions{hint}[/]")
+            c.print()
+
+            if version is not None and (version < 1 or version > total):
+                c.print(
+                    f"[red]Version {version} out of range "
+                    f"(1–{total} available).[/]"
                 )
-                display.console().print(f"[bold]{number}.[/] {text.strip()}\n")
+                raise typer.Exit(code=1)
+
+            if show_all:
+                for i, v in enumerate(versions, start=1):
+                    label = f"Version {i} of {total}"
+                    if i == 1:
+                        label += " · latest"
+                    c.rule(f"[bold]{label}[/]")
+                    c.print()
+                    display.show_questionnaire_version(v)
+                return
+
+            idx = (version - 1) if version is not None else 0
+            if total > 1:
+                label = f"version {idx + 1} of {total}"
+                if idx == 0:
+                    label += " · latest"
+                c.print(f"[dim]{label}[/]\n")
+            display.show_questionnaire_version(versions[idx])
             return
 
         rows = db.list_questionnaires(conn)
