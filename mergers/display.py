@@ -242,6 +242,33 @@ def _render_comments(merger: Merger) -> None:
     c.print(Panel("\n\n".join(parts), title="Commentary", border_style="green"))
 
 
+def show_questionnaire_version(data: dict[str, Any]) -> None:
+    """Render questions from a questionnaire data dict (primary or a version entry)."""
+    c = console()
+    deadline = data.get("deadline") or "—"
+    count = data.get("questions_count") or len(data.get("questions") or [])
+    header = f"Deadline: {deadline}  |  {count} questions"
+    if data.get("file_name"):
+        header += f"  |  {data['file_name']}"
+    c.print(header)
+    c.print()
+    current_section: object = _MISSING
+    for i, question in enumerate(data.get("questions") or [], start=1):
+        number = question.get("number") or question.get("question_number") or i
+        text = (
+            question.get("text")
+            or question.get("question")
+            or question.get("question_text")
+            or ""
+        )
+        section = question.get("section")
+        if section != current_section:
+            current_section = section
+            if section:
+                c.print(f"[bold underline]{section}[/]\n")
+        c.print(f"[bold]{number}.[/] {text.strip()}\n")
+
+
 def show_questionnaire_list(rows: Iterable[Any]) -> None:
     c = console()
     table = Table(title="Mergers with questionnaires", expand=True)

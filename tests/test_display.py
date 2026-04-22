@@ -311,3 +311,48 @@ def test_cli_install_completion_flag_exists():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     assert "--install-completion" in _strip_ansi(result.stdout)
+
+
+def test_cli_questions_single_version_no_hint(populated_db):
+    result = runner.invoke(app, ["questions", "MN-01016"])
+    assert result.exit_code == 0, result.output
+    output = _strip_ansi(result.stdout)
+    assert "questionnaire versions" not in output
+
+
+def test_cli_questions_multi_version_shows_hint(populated_db):
+    result = runner.invoke(app, ["questions", "MN-01017"])
+    assert result.exit_code == 0, result.output
+    output = _strip_ansi(result.stdout)
+    assert "2 questionnaire versions" in output
+    assert "--all" in output
+
+
+def test_cli_questions_version_number(populated_db):
+    result = runner.invoke(app, ["questions", "MN-01017", "2"])
+    assert result.exit_code == 0, result.output
+    output = _strip_ansi(result.stdout)
+    # Version 2 has the earlier deadline
+    assert "2025-05-15" in output or "15 May 2025" in output
+    assert "version 2 of 2" in output
+
+
+def test_cli_questions_all_flag_renders_both(populated_db):
+    result = runner.invoke(app, ["questions", "MN-01017", "--all"])
+    assert result.exit_code == 0, result.output
+    output = _strip_ansi(result.stdout)
+    assert "Version 1 of 2" in output
+    assert "Version 2 of 2" in output
+
+
+def test_cli_questions_version_out_of_range(populated_db):
+    result = runner.invoke(app, ["questions", "MN-01017", "99"])
+    assert result.exit_code != 0
+    assert "out of range" in _strip_ansi(result.stdout)
+
+
+def test_cli_questions_shows_section_headers(populated_db):
+    result = runner.invoke(app, ["questions", "MN-01016"])
+    assert result.exit_code == 0, result.output
+    output = _strip_ansi(result.stdout)
+    assert "Questions for all respondents" in output
