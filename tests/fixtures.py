@@ -177,22 +177,98 @@ MERGERS: list[dict[str, Any]] = [
 QUESTIONNAIRES: dict[str, dict[str, Any]] = {
     "MN-01016": {
         "deadline": "25 August 2025",
+        "deadline_iso": "2025-08-25",
+        "file_name": "Questionnaire - Asahi - Warehouse site.pdf",
         "questions_count": 3,
         "questions": [
             {
-                "number": "1",
+                "number": 1,
+                "section": "Questions for all respondents",
                 "text": "Outline any concerns regarding the impact of the proposed acquisition on competition in the relevant market.",
             },
             {
-                "number": "2",
+                "number": 2,
+                "section": "Questions for all respondents",
                 "text": "Provide any additional information that would assist the ACCC's assessment of the geographic market.",
             },
             {
-                "number": "3",
+                "number": 3,
+                "section": None,
                 "text": "Provide a brief description of your business and its relationship to the parties.",
             },
         ],
-    }
+    },
+    "MN-01017": {
+        "deadline": "1 June 2025",
+        "deadline_iso": "2025-06-01",
+        "file_name": "MN-01017 - PharmaCo - questionnaire - v2.pdf",
+        "questions_count": 3,
+        "all_questionnaires": [
+            {
+                "deadline": "1 June 2025",
+                "deadline_iso": "2025-06-01",
+                "file_name": "MN-01017 - PharmaCo - questionnaire - v2.pdf",
+                "questions_count": 3,
+                "questions": [
+                    {
+                        "number": 1,
+                        "section": None,
+                        "text": "Provide a brief description of your organisation and its commercial relationship with PharmaCo or GenericsRUs.",
+                    },
+                    {
+                        "number": 2,
+                        "section": "Questions for customers",
+                        "text": "Outline any concerns you have regarding the impact of the Acquisition on competition.",
+                    },
+                    {
+                        "number": 3,
+                        "section": "Questions for customers",
+                        "text": "Provide any additional information you consider relevant.",
+                    },
+                ],
+            },
+            {
+                "deadline": "15 May 2025",
+                "deadline_iso": "2025-05-15",
+                "file_name": "MN-01017 - PharmaCo - questionnaire - v1.pdf",
+                "questions_count": 3,
+                "questions": [
+                    {
+                        "number": 1,
+                        "section": None,
+                        "text": "Provide a brief description of your organisation and its commercial relationship with PharmaCo or GenericsRUs.",
+                    },
+                    {
+                        "number": 2,
+                        "section": "Questions for customers",
+                        "text": "Outline any concerns you have regarding the impact of the Acquisition on competition.",
+                    },
+                    {
+                        "number": 3,
+                        "section": "Questions for customers",
+                        "text": "Provide any additional information you consider relevant.",
+                    },
+                ],
+            },
+        ],
+        "questions": [
+            {
+                "number": 1,
+                "section": None,
+                "text": "Provide a brief description of your organisation and its commercial relationship with PharmaCo or GenericsRUs.",
+            },
+            {
+                "number": 2,
+                "section": "Questions for customers",
+                "text": "Outline any concerns you have regarding the impact of the Acquisition on competition.",
+            },
+            {
+                "number": 3,
+                "section": "Questions for customers",
+                "text": "Provide any additional information you consider relevant.",
+            },
+        ],
+    },
 }
 
 STATS: dict[str, Any] = {

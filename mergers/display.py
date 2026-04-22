@@ -198,12 +198,20 @@ def _render_determination_sections(merger: Merger, section: str) -> None:
         c.print(Panel(s.content.strip(), title=s.item, border_style="magenta"))
 
 
+_MISSING = object()
+
+
 def _render_questionnaire(q: Questionnaire) -> None:
     c = console()
     lines = [
-        f"[bold]Deadline:[/] {q.deadline or '—'}   "
-        f"[bold]Questions:[/] {q.questions_count}"
+        f"[bold]Deadline:[/] {q.deadline or '—'}   [bold]Questions:[/] {q.questions_count}"
     ]
+    if q.file_name:
+        lines.append(f"[bold]File:[/] {q.file_name}")
+    if len(q.all_questionnaires) > 1:
+        lines.append(f"[dim]{len(q.all_questionnaires)} questionnaire versions on record[/]")
+
+    current_section: object = _MISSING
     for i, question in enumerate(q.questions, start=1):
         number = question.get("number") or question.get("question_number") or i
         text = (
@@ -212,6 +220,11 @@ def _render_questionnaire(q: Questionnaire) -> None:
             or question.get("question_text")
             or ""
         )
+        section = question.get("section")
+        if section != current_section:
+            current_section = section
+            if section:
+                lines.append(f"\n[bold underline]{section}[/]")
         lines.append(f"\n[bold]{number}.[/] {text.strip()}")
     c.print(Panel("\n".join(lines), title="Questionnaire", border_style="yellow"))
 

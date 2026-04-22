@@ -209,6 +209,9 @@ class Questionnaire:
     deadline: str | None
     questions: list[dict[str, Any]]
     questions_count: int
+    deadline_iso: str | None = None
+    file_name: str | None = None
+    all_questionnaires: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, merger_id: str, data: dict[str, Any]) -> "Questionnaire":
@@ -219,4 +222,7 @@ class Questionnaire:
             deadline=data.get("deadline"),
             questions=questions,
             questions_count=int(data.get("questions_count") or len(questions)),
+            deadline_iso=data.get("deadline_iso"),
+            file_name=data.get("file_name"),
+            all_questionnaires=list(data.get("all_questionnaires") or []),
         )

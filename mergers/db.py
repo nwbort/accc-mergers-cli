@@ -63,8 +63,11 @@ CREATE VIRTUAL TABLE IF NOT EXISTS merger_content USING fts5(
 CREATE TABLE IF NOT EXISTS questionnaires (
     merger_id TEXT PRIMARY KEY,
     deadline TEXT,
+    deadline_iso TEXT,
+    file_name TEXT,
     questions_count INTEGER,
-    raw_json TEXT
+    raw_json TEXT,
+    all_questionnaires_json TEXT
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS questionnaire_content USING fts5(
@@ -91,8 +94,20 @@ CREATE TABLE IF NOT EXISTS industries (
 """
 
 
+def _migrate_schema(conn: sqlite3.Connection) -> None:
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(questionnaires)").fetchall()}
+    for col, defn in [
+        ("deadline_iso", "TEXT"),
+        ("file_name", "TEXT"),
+        ("all_questionnaires_json", "TEXT"),
+    ]:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE questionnaires ADD COLUMN {col} {defn}")
+
+
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    _migrate_schema(conn)
     conn.commit()
 
 
@@ -162,10 +177,19 @@ def insert_merger(conn: sqlite3.Connection, merger: Merger) -> None:
 def insert_questionnaire(conn: sqlite3.Connection, q: Questionnaire) -> None:
     conn.execute(
         """
-        INSERT OR REPLACE INTO questionnaires (merger_id, deadline, questions_count, raw_json)
-        VALUES (?, ?, ?, ?)
+        INSERT OR REPLACE INTO questionnaires
+        (merger_id, deadline, deadline_iso, file_name, questions_count, raw_json, all_questionnaires_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
-        (q.merger_id, q.deadline, q.questions_count, json.dumps(q.questions)),
+        (
+            q.merger_id,
+            q.deadline,
+            q.deadline_iso,
+            q.file_name,
+            q.questions_count,
+            json.dumps(q.questions),
+            json.dumps(q.all_questionnaires) if q.all_questionnaires else None,
+        ),
     )
     conn.execute(
         "DELETE FROM questionnaire_content WHERE merger_id = ?", (q.merger_id,)
@@ -363,12 +387,17 @@ def get_questionnaire(
     ).fetchone()
     merger_name = merger_row["merger_name"] if merger_row else None
     questions = json.loads(row["raw_json"])
+    all_q_raw = row["all_questionnaires_json"]
+    all_q = json.loads(all_q_raw) if all_q_raw else []
     return Questionnaire(
         merger_id=merger_id,
         merger_name=merger_name,
         deadline=row["deadline"],
         questions=questions,
         questions_count=row["questions_count"],
+        deadline_iso=row["deadline_iso"],
+        file_name=row["file_name"],
+        all_questionnaires=all_q,
     )
 
 

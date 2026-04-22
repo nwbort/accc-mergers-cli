@@ -20,8 +20,37 @@ def test_sync_indexes_everything_from_bundle(populated_db):
         q = db.get_questionnaire(conn, "MN-01016")
         assert q is not None
         assert q.questions_count == 3
+        assert q.deadline_iso == "2025-08-25"
+        assert q.file_name == "Questionnaire - Asahi - Warehouse site.pdf"
+        assert q.all_questionnaires == []
         stats = db.get_stats(conn)
         assert stats["totals"]["total_mergers"] == 3
+    finally:
+        conn.close()
+
+
+def test_sync_indexes_multi_questionnaire(populated_db):
+    conn = db.connect()
+    try:
+        q = db.get_questionnaire(conn, "MN-01017")
+        assert q is not None
+        assert q.questions_count == 3
+        assert q.deadline_iso == "2025-06-01"
+        assert q.file_name == "MN-01017 - PharmaCo - questionnaire - v2.pdf"
+        assert len(q.all_questionnaires) == 2
+        assert q.all_questionnaires[0]["deadline_iso"] == "2025-06-01"
+        assert q.all_questionnaires[1]["deadline_iso"] == "2025-05-15"
+    finally:
+        conn.close()
+
+
+def test_sync_indexes_question_sections(populated_db):
+    conn = db.connect()
+    try:
+        q = db.get_questionnaire(conn, "MN-01016")
+        assert q is not None
+        assert q.questions[0]["section"] == "Questions for all respondents"
+        assert q.questions[2]["section"] is None
     finally:
         conn.close()
 
