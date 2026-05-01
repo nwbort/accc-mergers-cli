@@ -259,7 +259,7 @@ def search(
 @app.command()
 def show(
     merger_id: str = typer.Argument(
-        ..., help="Merger ID, e.g. MN-01016 (also accepts 'mn 01016')."
+        ..., help="Merger ID, e.g. MN-01016 (also accepts 'mn 01016', 'MN01016')."
     ),
     section: str = typer.Option(
         "all",
@@ -312,7 +312,7 @@ def show(
 @app.command()
 def timeline(
     merger_id: str = typer.Argument(
-        ..., help="Merger ID, e.g. MN-01016 (also accepts 'mn 01016')."
+        ..., help="Merger ID, e.g. MN-01016 (also accepts 'mn 01016', 'MN01016')."
     ),
     json_output: bool = typer.Option(
         False, "--json", help="Output the timeline as JSON."

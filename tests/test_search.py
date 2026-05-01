@@ -105,6 +105,9 @@ def test_get_merger_accepts_lowercase_and_space(populated_db):
         assert db.get_merger(conn, "mn-01016").merger_id == "MN-01016"
         assert db.get_merger(conn, "mn 01016").merger_id == "MN-01016"
         assert db.get_merger(conn, "  MN 01016  ").merger_id == "MN-01016"
+        assert db.get_merger(conn, "MN01016").merger_id == "MN-01016"
+        assert db.get_merger(conn, "mn01016").merger_id == "MN-01016"
+        assert db.get_merger(conn, "  mn01016  ").merger_id == "MN-01016"
     finally:
         conn.close()
 
@@ -114,6 +117,7 @@ def test_get_questionnaire_accepts_lowercase_and_space(populated_db):
     try:
         assert db.get_questionnaire(conn, "mn-01016").merger_id == "MN-01016"
         assert db.get_questionnaire(conn, "mn 01016").merger_id == "MN-01016"
+        assert db.get_questionnaire(conn, "mn01016").merger_id == "MN-01016"
     finally:
         conn.close()
 
