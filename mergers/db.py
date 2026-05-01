@@ -358,9 +358,17 @@ def list_mergers(
     return conn.execute(sql, params).fetchall()
 
 
+_MERGER_ID_RE = re.compile(r"^([A-Z]+)[\s\-_]*(\d+)$")
+
+
 def normalize_merger_id(merger_id: str) -> str:
-    """Accept lowercase variants and space separators (e.g. ``mn 01016``)."""
-    return merger_id.strip().upper().replace(" ", "-")
+    """Accept lowercase variants and flexible separators (e.g. ``mn 01016``,
+    ``mn-01016``, ``MN45006``)."""
+    cleaned = merger_id.strip().upper()
+    match = _MERGER_ID_RE.match(cleaned)
+    if match:
+        return f"{match.group(1)}-{match.group(2)}"
+    return cleaned.replace(" ", "-")
 
 
 def get_merger(conn: sqlite3.Connection, merger_id: str) -> Merger | None:
