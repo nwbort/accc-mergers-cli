@@ -50,9 +50,6 @@ CREATE TABLE IF NOT EXISTS mergers (
     raw_json TEXT
 );
 
-CREATE INDEX IF NOT EXISTS mergers_related_merger_id_idx
-    ON mergers(related_merger_id);
-
 CREATE VIRTUAL TABLE IF NOT EXISTS merger_content USING fts5(
     merger_id UNINDEXED,
     merger_name,
@@ -118,6 +115,9 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     ]:
         if col not in merger_cols:
             conn.execute(f"ALTER TABLE mergers ADD COLUMN {col} {defn}")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS mergers_related_merger_id_idx ON mergers(related_merger_id)"
+    )
 
 
 def init_schema(conn: sqlite3.Connection) -> None:
