@@ -21,7 +21,7 @@ from urllib.parse import urlparse, unquote
 import httpx
 
 from . import __version__, db
-from .models import Merger, Questionnaire
+from .models import Merger, Nocc, Questionnaire
 
 BASE_URL_ENV = "ACCC_MERGERS_BASE_URL"
 DEFAULT_BASE_URL = (
@@ -293,6 +293,13 @@ def _persist(bundle: dict[str, Any]) -> dict[str, int]:
                 q = Questionnaire.from_dict(mid, q_data)
                 db.insert_questionnaire(conn, q)
                 q_count += 1
+
+        noccs = bundle.get("noccs") or {}
+        if isinstance(noccs, dict):
+            for mid, n_data in noccs.items():
+                if not isinstance(n_data, dict):
+                    continue
+                db.insert_nocc(conn, Nocc.from_dict(mid, n_data))
 
         stats = bundle.get("stats")
         if stats is not None:

@@ -12,7 +12,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from .models import Merger, Questionnaire
+from .models import Merger, Nocc, Questionnaire
 
 _console: Console | None = None
 
@@ -112,7 +112,12 @@ def _relationship_label(value: str | None) -> str:
     return value.replace("_", " ").strip().capitalize() or "Related"
 
 
-def show_merger(merger: Merger, questionnaire: Questionnaire | None, section: str = "all") -> None:
+def show_merger(
+    merger: Merger,
+    questionnaire: Questionnaire | None,
+    section: str = "all",
+    nocc: Nocc | None = None,
+) -> None:
     c = console()
 
     header_lines = [
@@ -154,6 +159,9 @@ def show_merger(merger: Merger, questionnaire: Questionnaire | None, section: st
 
     if section in ("all", "questionnaire") and questionnaire:
         _render_questionnaire(questionnaire)
+
+    if section in ("all", "nocc") and nocc:
+        _render_nocc(nocc)
 
     if section == "all":
         _render_comments(merger)
@@ -251,6 +259,81 @@ def _render_questionnaire(q: Questionnaire) -> None:
                 lines.append(f"\n[bold underline]{section}[/]")
         lines.append(f"\n[bold]{number}.[/] {text.strip()}")
     c.print(Panel("\n".join(lines), title="Questionnaire", border_style="yellow"))
+
+
+def _render_nocc(nocc: Nocc) -> None:
+    c = console()
+    header_bits: list[str] = []
+    if nocc.document_type:
+        header_bits.append(f"[bold]{nocc.document_type}[/]")
+    if nocc.date:
+        header_bits.append(f"[bold]Date:[/] {nocc.date}")
+    if nocc.file_name:
+        header_bits.append(f"[bold]File:[/] {nocc.file_name}")
+    lines: list[str] = []
+    if header_bits:
+        lines.append("   ".join(header_bits))
+
+    for s in nocc.sections:
+        if lines:
+            lines.append("")
+        title_parts = [
+            p for p in [s.number, s.title] if p and str(p).strip()
+        ]
+        if title_parts:
+            lines.append(f"[bold underline]{' '.join(title_parts)}[/]")
+        for block in s.blocks:
+            text = (block.text or "").strip()
+            if not text:
+                continue
+            if block.type == "heading":
+                lines.append(f"\n[bold]{text}[/]")
+            elif block.number:
+                lines.append(f"\n[bold]{block.number}.[/] {text}")
+            else:
+                lines.append(f"\n{text}")
+    c.print(
+        Panel(
+            "\n".join(lines) if lines else "(no content)",
+            title="Notice of Competition Concerns",
+            border_style="red",
+        )
+    )
+
+
+def show_nocc_list(rows: Iterable[Any]) -> None:
+    c = console()
+    table = Table(title="Notices of Competition Concerns", expand=True)
+    table.add_column("ID", style="bold cyan")
+    table.add_column("Name", overflow="fold")
+    table.add_column("Date", no_wrap=True)
+    table.add_column("Document type", overflow="fold")
+    for row in rows:
+        table.add_row(
+            row["merger_id"],
+            row["merger_name"] or "",
+            row["date"] or "—",
+            row["document_type"] or "—",
+        )
+    c.print(table)
+
+
+def show_nocc_matches(rows: Iterable[Any]) -> None:
+    c = console()
+    table = Table(title="Matching NOCC paragraphs", expand=True)
+    table.add_column("ID", style="bold cyan")
+    table.add_column("Merger", overflow="fold")
+    table.add_column("§", no_wrap=True)
+    table.add_column("Excerpt", overflow="fold")
+    for row in rows:
+        ref = row["block_number"] or row["section_number"] or ""
+        table.add_row(
+            row["merger_id"],
+            row["merger_name"] or "",
+            str(ref),
+            row["block_text"] or "",
+        )
+    c.print(table)
 
 
 def _render_comments(merger: Merger) -> None:

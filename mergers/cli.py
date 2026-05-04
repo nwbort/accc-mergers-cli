@@ -281,7 +281,7 @@ def show(
         "--section",
         help=(
             "all | determination (full determination content) | reasons | overlap"
-            " | parties | industries | description | questionnaire"
+            " | parties | industries | description | questionnaire | nocc"
         ),
     ),
     json_output: bool = typer.Option(
@@ -300,6 +300,7 @@ def show(
         "determination",
         "description",
         "questionnaire",
+        "nocc",
     }
     if section not in allowed:
         raise typer.BadParameter(f"--section must be one of {sorted(allowed)}")
@@ -308,6 +309,7 @@ def show(
     try:
         merger = db.get_merger(conn, merger_id)
         questionnaire = db.get_questionnaire(conn, merger_id)
+        nocc = db.get_nocc(conn, merger_id)
     finally:
         conn.close()
 
@@ -321,7 +323,7 @@ def show(
         display.print_json(merger.raw)
         return
 
-    display.show_merger(merger, questionnaire, section=section)
+    display.show_merger(merger, questionnaire, section=section, nocc=nocc)
 
 
 @app.command()
@@ -675,6 +677,90 @@ def questions(
             display.console().print("[yellow]No questionnaires cached.[/]")
             return
         display.show_questionnaire_list(rows)
+    finally:
+        conn.close()
+
+
+@app.command()
+def noccs(
+    merger_id: Optional[str] = typer.Argument(
+        None, help="Merger ID. Omit to list mergers with NOCCs."
+    ),
+    search_text: Optional[str] = typer.Option(
+        None,
+        "--search",
+        help="Full-text search across NOCC paragraph text.",
+    ),
+    limit: int = typer.Option(20, "--limit"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Browse Notices of Competition Concerns (NOCCs) issued in Phase 2."""
+    _auto_sync_if_needed()
+    conn = _with_connection()
+    try:
+        if search_text:
+            rows = db.search_noccs(conn, search_text, limit=limit)
+            if json_output:
+                display.print_json([dict(r) for r in rows])
+                return
+            if not rows:
+                display.console().print("[yellow]No matching NOCC paragraphs.[/]")
+                return
+            display.show_nocc_matches(rows)
+            return
+
+        if merger_id:
+            n = db.get_nocc(conn, merger_id)
+            if not n:
+                display.console().print(
+                    f"[yellow]No NOCC for {merger_id}.[/]"
+                )
+                raise typer.Exit(code=1)
+            if json_output:
+                display.print_json(
+                    {
+                        "merger_id": n.merger_id,
+                        "merger_name": n.merger_name,
+                        "matter_id": n.matter_id,
+                        "date": n.date,
+                        "date_iso": n.date_iso,
+                        "document_type": n.document_type,
+                        "file_name": n.file_name,
+                        "file_path": n.file_path,
+                        "sections": [
+                            {
+                                "number": s.number,
+                                "title": s.title,
+                                "blocks": [
+                                    {
+                                        "number": b.number,
+                                        "text": b.text,
+                                        "type": b.type,
+                                    }
+                                    for b in s.blocks
+                                ],
+                            }
+                            for s in n.sections
+                        ],
+                    }
+                )
+                return
+
+            c = display.console()
+            name = n.merger_name or ""
+            c.print(f"[bold cyan]{n.merger_id}[/] — [bold]{name}[/]")
+            c.print()
+            display._render_nocc(n)
+            return
+
+        rows = db.list_noccs(conn)
+        if json_output:
+            display.print_json([dict(r) for r in rows])
+            return
+        if not rows:
+            display.console().print("[yellow]No NOCCs cached.[/]")
+            return
+        display.show_nocc_list(rows)
     finally:
         conn.close()
 

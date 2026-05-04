@@ -225,6 +225,65 @@ class Merger:
 
 
 @dataclass
+class NoccBlock:
+    text: str
+    type: str = "paragraph"
+    number: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "NoccBlock":
+        return cls(
+            text=data.get("text") or "",
+            type=data.get("type") or "paragraph",
+            number=data.get("number"),
+        )
+
+
+@dataclass
+class NoccSection:
+    blocks: list[NoccBlock] = field(default_factory=list)
+    number: str | None = None
+    title: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "NoccSection":
+        return cls(
+            blocks=[NoccBlock.from_dict(b) for b in (data.get("blocks") or [])],
+            number=data.get("number"),
+            title=data.get("title"),
+        )
+
+
+@dataclass
+class Nocc:
+    merger_id: str
+    matter_id: str | None = None
+    date: str | None = None
+    date_iso: str | None = None
+    document_type: str | None = None
+    file_name: str | None = None
+    file_path: str | None = None
+    sections: list[NoccSection] = field(default_factory=list)
+    merger_name: str | None = None
+
+    @classmethod
+    def from_dict(cls, merger_id: str, data: dict[str, Any]) -> "Nocc":
+        return cls(
+            merger_id=merger_id,
+            matter_id=data.get("matter_id") or merger_id,
+            date=data.get("date"),
+            date_iso=data.get("date_iso"),
+            document_type=data.get("document_type"),
+            file_name=data.get("file_name"),
+            file_path=data.get("file_path"),
+            sections=[NoccSection.from_dict(s) for s in (data.get("sections") or [])],
+        )
+
+    def block_count(self) -> int:
+        return sum(len(s.blocks) for s in self.sections)
+
+
+@dataclass
 class Questionnaire:
     merger_id: str
     merger_name: str | None

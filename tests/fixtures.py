@@ -276,6 +276,61 @@ QUESTIONNAIRES: dict[str, dict[str, Any]] = {
     },
 }
 
+NOCCS: dict[str, dict[str, Any]] = {
+    "MN-01017": {
+        "matter_id": "MN-01017",
+        "date": "1 March 2026",
+        "date_iso": "2026-03-01",
+        "document_type": "Notice of Competition Concerns – Summary",
+        "file_name": "PharmaCo - NOCC summary - 1 March 2026.pdf",
+        "file_path": "matters/MN-01017/PharmaCo - NOCC summary - 1 March 2026.pdf",
+        "sections": [
+            {
+                "number": "1",
+                "title": "Introduction",
+                "blocks": [
+                    {
+                        "number": "1.1",
+                        "type": "paragraph",
+                        "text": (
+                            "On 1 May 2025, PharmaCo Ltd lodged a notification "
+                            "for the proposed acquisition of GenericsRUs."
+                        ),
+                    },
+                    {
+                        "number": "1.2",
+                        "type": "paragraph",
+                        "text": (
+                            "On 1 July 2025, the ACCC decided that the "
+                            "Acquisition is to be subject to Phase 2 review."
+                        ),
+                    },
+                ],
+            },
+            {
+                "number": "2",
+                "title": "The parties",
+                "blocks": [
+                    {
+                        "type": "heading",
+                        "text": "The acquirer – PharmaCo",
+                    },
+                    {
+                        "number": "2.1",
+                        "type": "paragraph",
+                        "text": (
+                            "PharmaCo Ltd is an ASX-listed pharmaceutical "
+                            "manufacturer with a portfolio of generic oncology "
+                            "treatments."
+                        ),
+                    },
+                ],
+            },
+        ],
+    },
+}
+
+
 STATS: dict[str, Any] = {
     "totals": {
         "total_mergers": 3,
@@ -316,6 +371,7 @@ def write_bundle_tree(
     *,
     mergers: list[dict[str, Any]] | None = None,
     questionnaires: dict[str, dict[str, Any]] | None = None,
+    noccs: dict[str, dict[str, Any]] | None = None,
     stats: Any = STATS,
     industries: Any = INDUSTRIES,
     version: int = 1,
@@ -334,6 +390,7 @@ def write_bundle_tree(
         "questionnaires": (
             questionnaires if questionnaires is not None else QUESTIONNAIRES
         ),
+        "noccs": noccs if noccs is not None else NOCCS,
         "stats": stats,
         "industries": industries,
     }

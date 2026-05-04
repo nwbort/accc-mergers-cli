@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-from .models import Merger, Questionnaire
+from .models import Merger, Nocc, NoccBlock, NoccSection, Questionnaire
 
 CACHE_DIR = Path.home() / ".accc-mergers"
 DB_PATH = CACHE_DIR / "db.sqlite"
@@ -80,6 +80,26 @@ CREATE VIRTUAL TABLE IF NOT EXISTS questionnaire_content USING fts5(
     tokenize = 'porter unicode61'
 );
 
+CREATE TABLE IF NOT EXISTS noccs (
+    merger_id TEXT PRIMARY KEY,
+    matter_id TEXT,
+    date TEXT,
+    date_iso TEXT,
+    document_type TEXT,
+    file_name TEXT,
+    file_path TEXT,
+    raw_json TEXT
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS nocc_content USING fts5(
+    merger_id UNINDEXED,
+    section_number UNINDEXED,
+    section_title,
+    block_number UNINDEXED,
+    block_text,
+    tokenize = 'porter unicode61'
+);
+
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT
@@ -133,6 +153,8 @@ def clear_mergers(conn: sqlite3.Connection) -> None:
         DELETE FROM merger_content;
         DELETE FROM questionnaires;
         DELETE FROM questionnaire_content;
+        DELETE FROM noccs;
+        DELETE FROM nocc_content;
         """
     )
     conn.commit()
@@ -452,6 +474,128 @@ def list_questionnaires(conn: sqlite3.Connection) -> list[sqlite3.Row]:
         ORDER BY q.deadline DESC NULLS LAST, q.merger_id DESC
         """
     ).fetchall()
+
+
+def insert_nocc(conn: sqlite3.Connection, n: Nocc) -> None:
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO noccs
+        (merger_id, matter_id, date, date_iso, document_type, file_name,
+         file_path, raw_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            n.merger_id,
+            n.matter_id,
+            n.date,
+            n.date_iso,
+            n.document_type,
+            n.file_name,
+            n.file_path,
+            json.dumps(
+                {
+                    "sections": [
+                        {
+                            "number": s.number,
+                            "title": s.title,
+                            "blocks": [
+                                {"number": b.number, "text": b.text, "type": b.type}
+                                for b in s.blocks
+                            ],
+                        }
+                        for s in n.sections
+                    ]
+                }
+            ),
+        ),
+    )
+    conn.execute(
+        "DELETE FROM nocc_content WHERE merger_id = ?", (n.merger_id,)
+    )
+    for section in n.sections:
+        for block in section.blocks:
+            if not (block.text or "").strip():
+                continue
+            conn.execute(
+                """
+                INSERT INTO nocc_content
+                (merger_id, section_number, section_title, block_number, block_text)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    n.merger_id,
+                    str(section.number or ""),
+                    section.title or "",
+                    str(block.number or ""),
+                    block.text,
+                ),
+            )
+
+
+def _nocc_from_row(row: sqlite3.Row, merger_name: str | None = None) -> Nocc:
+    payload = json.loads(row["raw_json"]) if row["raw_json"] else {}
+    sections = [
+        NoccSection(
+            number=s.get("number"),
+            title=s.get("title"),
+            blocks=[NoccBlock.from_dict(b) for b in (s.get("blocks") or [])],
+        )
+        for s in (payload.get("sections") or [])
+    ]
+    return Nocc(
+        merger_id=row["merger_id"],
+        matter_id=row["matter_id"],
+        date=row["date"],
+        date_iso=row["date_iso"],
+        document_type=row["document_type"],
+        file_name=row["file_name"],
+        file_path=row["file_path"],
+        sections=sections,
+        merger_name=merger_name,
+    )
+
+
+def get_nocc(conn: sqlite3.Connection, merger_id: str) -> Nocc | None:
+    merger_id = normalize_merger_id(merger_id)
+    row = conn.execute(
+        "SELECT * FROM noccs WHERE merger_id = ?", (merger_id,)
+    ).fetchone()
+    if not row:
+        return None
+    merger_row = conn.execute(
+        "SELECT merger_name FROM mergers WHERE merger_id = ?", (merger_id,)
+    ).fetchone()
+    merger_name = merger_row["merger_name"] if merger_row else None
+    return _nocc_from_row(row, merger_name=merger_name)
+
+
+def list_noccs(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute(
+        """
+        SELECT n.merger_id, n.date, n.date_iso, n.document_type,
+               n.file_name, m.merger_name
+        FROM noccs n
+        LEFT JOIN mergers m ON m.merger_id = n.merger_id
+        ORDER BY n.date_iso DESC NULLS LAST, n.merger_id DESC
+        """
+    ).fetchall()
+
+
+def search_noccs(
+    conn: sqlite3.Connection, query: str, limit: int = 20
+) -> list[sqlite3.Row]:
+    sql = """
+        SELECT nc.merger_id, nc.section_number, nc.section_title,
+               nc.block_number, nc.block_text,
+               m.merger_name,
+               bm25(nocc_content) AS rank
+        FROM nocc_content nc
+        LEFT JOIN mergers m ON m.merger_id = nc.merger_id
+        WHERE nocc_content MATCH ?
+        ORDER BY rank
+        LIMIT ?
+    """
+    return conn.execute(sql, (query, limit)).fetchall()
 
 
 def search_questions(conn: sqlite3.Connection, query: str, limit: int = 20) -> list[sqlite3.Row]:
