@@ -140,6 +140,11 @@ MERGERS: list[dict[str, Any]] = [
         "status": "Completed",
         "stage": "Phase 1",
         "is_waiver": True,
+        "related_merger": {
+            "merger_id": "MN-01016",
+            "relationship": "refiled_as",
+            "merger_name": "Asahi – Warehouse site (Deer Park, Vic)",
+        },
         "acquirers": [{"name": "Ampol Limited"}],
         "targets": [{"name": "Regional Fuel Holdings"}],
         "anzsic_codes": [

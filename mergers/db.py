@@ -44,8 +44,14 @@ CREATE TABLE IF NOT EXISTS mergers (
     phase INTEGER,
     notification_date TEXT,
     determination_date TEXT,
+    related_merger_id TEXT,
+    related_relationship TEXT,
+    related_merger_name TEXT,
     raw_json TEXT
 );
+
+CREATE INDEX IF NOT EXISTS mergers_related_merger_id_idx
+    ON mergers(related_merger_id);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS merger_content USING fts5(
     merger_id UNINDEXED,
@@ -104,6 +110,15 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         if col not in existing:
             conn.execute(f"ALTER TABLE questionnaires ADD COLUMN {col} {defn}")
 
+    merger_cols = {row[1] for row in conn.execute("PRAGMA table_info(mergers)").fetchall()}
+    for col, defn in [
+        ("related_merger_id", "TEXT"),
+        ("related_relationship", "TEXT"),
+        ("related_merger_name", "TEXT"),
+    ]:
+        if col not in merger_cols:
+            conn.execute(f"ALTER TABLE mergers ADD COLUMN {col} {defn}")
+
 
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
@@ -126,13 +141,20 @@ def clear_mergers(conn: sqlite3.Connection) -> None:
 def insert_merger(conn: sqlite3.Connection, merger: Merger) -> None:
     determination = merger.outcome()
 
+    related = merger.related_merger
+    related_id = related.merger_id if related else None
+    related_relationship = related.relationship if related else None
+    related_name = related.merger_name if related else None
+
     conn.execute(
         """
         INSERT OR REPLACE INTO mergers (
             merger_id, merger_name, status, stage, is_waiver,
             acquirers_text, targets_text, industries_text,
-            determination, phase, notification_date, determination_date, raw_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            determination, phase, notification_date, determination_date,
+            related_merger_id, related_relationship, related_merger_name,
+            raw_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             merger.merger_id,
@@ -147,6 +169,9 @@ def insert_merger(conn: sqlite3.Connection, merger: Merger) -> None:
             merger.phase_number(),
             merger.effective_notification_datetime,
             merger.determination_publication_date,
+            related_id,
+            related_relationship,
+            related_name,
             json.dumps(merger.raw),
         ),
     )
@@ -260,6 +285,7 @@ class SearchFilters:
     year: int | None = None
     since: str | None = None
     until: str | None = None
+    has_related: bool | None = None
     limit: int = 10
 
 
@@ -313,6 +339,14 @@ def _apply_filters(
             "m.notification_date IS NOT NULL AND substr(m.notification_date, 1, 10) <= ?"
         )
         params.append(filters.until)
+    if filters.has_related is True:
+        extra_where.append(
+            "m.related_merger_id IS NOT NULL AND m.related_merger_id != ''"
+        )
+    elif filters.has_related is False:
+        extra_where.append(
+            "(m.related_merger_id IS NULL OR m.related_merger_id = '')"
+        )
 
 
 def search(
@@ -526,6 +560,47 @@ def mergers_by_party(
     )
     params.append(filters.limit)
     return conn.execute(sql, params).fetchall()
+
+
+def related_mergers(
+    conn: sqlite3.Connection, merger_id: str
+) -> list[sqlite3.Row]:
+    """Return mergers linked to ``merger_id`` via ``related_merger``.
+
+    Includes the merger ``merger_id`` itself points at (forward link, e.g.
+    a waiver pointing to the notification it was refiled as) and any
+    mergers that point back at ``merger_id`` (reverse links). Excludes
+    ``merger_id`` itself.
+    """
+    merger_id = normalize_merger_id(merger_id)
+    forward_row = conn.execute(
+        "SELECT related_merger_id FROM mergers WHERE merger_id = ?",
+        (merger_id,),
+    ).fetchone()
+    forward_id = (
+        forward_row["related_merger_id"]
+        if forward_row and forward_row["related_merger_id"]
+        else None
+    )
+
+    ids: list[str] = []
+    if forward_id and forward_id != merger_id:
+        ids.append(forward_id)
+    reverse_rows = conn.execute(
+        "SELECT merger_id FROM mergers WHERE related_merger_id = ?",
+        (merger_id,),
+    ).fetchall()
+    for row in reverse_rows:
+        if row["merger_id"] != merger_id and row["merger_id"] not in ids:
+            ids.append(row["merger_id"])
+
+    if not ids:
+        return []
+    placeholders = ",".join("?" for _ in ids)
+    sql = f"SELECT * FROM mergers WHERE merger_id IN ({placeholders})"
+    rows = conn.execute(sql, ids).fetchall()
+    by_id = {row["merger_id"]: row for row in rows}
+    return [by_id[i] for i in ids if i in by_id]
 
 
 def search_regex(

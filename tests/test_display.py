@@ -351,6 +351,44 @@ def test_cli_questions_version_out_of_range(populated_db):
     assert "out of range" in _strip_ansi(result.stdout)
 
 
+def test_cli_show_includes_related_merger(populated_db):
+    result = runner.invoke(app, ["show", "MN-01019"])
+    assert result.exit_code == 0, result.output
+    output = _strip_ansi(result.stdout)
+    assert "Refiled as" in output
+    assert "MN-01016" in output
+
+
+def test_cli_related_lists_forward_link(populated_db):
+    result = runner.invoke(app, ["related", "MN-01019", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["related_merger"]["merger_id"] == "MN-01016"
+    assert payload["related_merger"]["relationship"] == "refiled_as"
+    assert [r["merger_id"] for r in payload["related"]] == ["MN-01016"]
+
+
+def test_cli_related_lists_reverse_link(populated_db):
+    result = runner.invoke(app, ["related", "MN-01016", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    # MN-01016 doesn't itself point anywhere, but MN-01019 points back at it.
+    assert payload["related_merger"] is None
+    assert [r["merger_id"] for r in payload["related"]] == ["MN-01019"]
+
+
+def test_cli_related_unknown_id(populated_db):
+    result = runner.invoke(app, ["related", "MN-99999"])
+    assert result.exit_code != 0
+
+
+def test_cli_list_has_related_filter(populated_db):
+    result = runner.invoke(app, ["list", "--has-related", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert [r["merger_id"] for r in payload] == ["MN-01019"]
+
+
 def test_cli_questions_shows_section_headers(populated_db):
     result = runner.invoke(app, ["questions", "MN-01016"])
     assert result.exit_code == 0, result.output

@@ -75,6 +75,21 @@ class Event:
 
 
 @dataclass
+class RelatedMerger:
+    merger_id: str
+    relationship: str | None = None
+    merger_name: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RelatedMerger":
+        return cls(
+            merger_id=str(data.get("merger_id") or "").strip(),
+            relationship=data.get("relationship"),
+            merger_name=data.get("merger_name"),
+        )
+
+
+@dataclass
 class Comment:
     text: str
     tags: list[str] = field(default_factory=list)
@@ -109,6 +124,7 @@ class Merger:
     determination_publication_date: str | None = None
     events: list[Event] = field(default_factory=list)
     comments: list[Comment] = field(default_factory=list)
+    related_merger: RelatedMerger | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -130,6 +146,12 @@ class Merger:
             determination_publication_date=data.get("determination_publication_date"),
             events=[Event.from_dict(e) for e in (data.get("events") or [])],
             comments=[Comment.from_dict(c) for c in (data.get("comments") or [])],
+            related_merger=(
+                RelatedMerger.from_dict(data["related_merger"])
+                if isinstance(data.get("related_merger"), dict)
+                and (data["related_merger"].get("merger_id"))
+                else None
+            ),
             raw=data,
         )
 

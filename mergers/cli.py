@@ -161,6 +161,7 @@ def _parse_filters(
     limit: int,
     since: str | None = None,
     until: str | None = None,
+    has_related: bool | None = None,
 ) -> SearchFilters:
     if outcome is not None:
         allowed = {"approved", "denied", "phase2", "pending"}
@@ -182,6 +183,7 @@ def _parse_filters(
         year=year,
         since=since,
         until=until,
+        has_related=has_related,
         limit=limit,
     )
 
@@ -221,6 +223,11 @@ def search(
         "--regex",
         help="Interpret the query as a Python regex instead of an FTS query.",
     ),
+    has_related: Optional[bool] = typer.Option(
+        None,
+        "--has-related/--no-related",
+        help="Only include mergers that have (or do not have) a related merger.",
+    ),
     limit: int = typer.Option(10, "--limit", help="Max results."),
     json_output: bool = typer.Option(
         False, "--json", help="Output raw JSON."
@@ -229,7 +236,15 @@ def search(
     """Full-text search across merger descriptions and determination text."""
     _auto_sync_if_needed()
     filters = _parse_filters(
-        outcome, industry, phase, waiver, year, limit, since=since, until=until
+        outcome,
+        industry,
+        phase,
+        waiver,
+        year,
+        limit,
+        since=since,
+        until=until,
+        has_related=has_related,
     )
 
     conn = _with_connection()
@@ -356,6 +371,72 @@ def timeline(
 
 
 @app.command()
+def related(
+    merger_id: str = typer.Argument(
+        ..., help="Merger ID, e.g. WA-01087 (also accepts 'wa 01087')."
+    ),
+    json_output: bool = typer.Option(
+        False, "--json", help="Output raw JSON."
+    ),
+) -> None:
+    """Show mergers linked via the 'related merger' field (e.g. waiver refiled as notification)."""
+    _auto_sync_if_needed()
+
+    conn = _with_connection()
+    try:
+        merger = db.get_merger(conn, merger_id)
+        rows = db.related_mergers(conn, merger_id)
+    finally:
+        conn.close()
+
+    if not merger:
+        display.console().print(
+            f"[red]No merger found with ID '{merger_id}'.[/]"
+        )
+        raise typer.Exit(code=1)
+
+    if json_output:
+        payload = {
+            "merger_id": merger.merger_id,
+            "merger_name": merger.merger_name,
+            "related_merger": (
+                {
+                    "merger_id": merger.related_merger.merger_id,
+                    "relationship": merger.related_merger.relationship,
+                    "merger_name": merger.related_merger.merger_name,
+                }
+                if merger.related_merger
+                else None
+            ),
+            "related": [display.row_as_dict(r) for r in rows],
+        }
+        display.print_json(payload)
+        return
+
+    c = display.console()
+    c.print(
+        f"[bold cyan]{merger.merger_id}[/] — [bold]{merger.merger_name}[/]"
+    )
+    if merger.related_merger:
+        rel = merger.related_merger
+        label = display._relationship_label(rel.relationship)
+        suffix = f" — {rel.merger_name}" if rel.merger_name else ""
+        c.print(
+            f"[magenta]{label}:[/] [bold cyan]{rel.merger_id}[/]{suffix}"
+        )
+
+    if not rows:
+        c.print("[yellow]No related mergers found.[/]")
+        return
+
+    c.print(
+        display.render_results_table(
+            rows, title=f"Mergers related to {merger.merger_id}"
+        )
+    )
+
+
+@app.command()
 def party(
     name: str = typer.Argument(
         ..., help="Party name (partial match, case-insensitive)."
@@ -372,6 +453,9 @@ def party(
     year: Optional[int] = typer.Option(None, "--year"),
     since: Optional[str] = typer.Option(None, "--since"),
     until: Optional[str] = typer.Option(None, "--until"),
+    has_related: Optional[bool] = typer.Option(
+        None, "--has-related/--no-related"
+    ),
     limit: int = typer.Option(50, "--limit"),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
@@ -382,7 +466,15 @@ def party(
         raise typer.BadParameter("--role must be 'acquirer' or 'target'")
 
     filters = _parse_filters(
-        outcome, industry, phase, waiver, year, limit, since=since, until=until
+        outcome,
+        industry,
+        phase,
+        waiver,
+        year,
+        limit,
+        since=since,
+        until=until,
+        has_related=has_related,
     )
 
     conn = _with_connection()
@@ -426,6 +518,11 @@ def list_cmd(
     until: Optional[str] = typer.Option(
         None, "--until", help="Notified on or before (YYYY-MM-DD)."
     ),
+    has_related: Optional[bool] = typer.Option(
+        None,
+        "--has-related/--no-related",
+        help="Only include mergers that have (or do not have) a related merger.",
+    ),
     limit: int = typer.Option(50, "--limit"),
     sort: str = typer.Option(
         "date-desc",
@@ -437,7 +534,15 @@ def list_cmd(
     """Browse mergers with filters, no search query required."""
     _auto_sync_if_needed()
     filters = _parse_filters(
-        outcome, industry, phase, waiver, year, limit, since=since, until=until
+        outcome,
+        industry,
+        phase,
+        waiver,
+        year,
+        limit,
+        since=since,
+        until=until,
+        has_related=has_related,
     )
 
     allowed_sort = {"date-asc", "date-desc", "name", "duration"}

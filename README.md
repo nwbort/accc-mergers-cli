@@ -45,6 +45,7 @@ mergers sync --force
 | `mergers search <query>` | Full-text search of descriptions and determinations |
 | `mergers show <id>` | Full detail on a single merger |
 | `mergers timeline <id>` | Chronological event timeline for one merger, with durations |
+| `mergers related <id>` | Mergers linked via the 'related merger' field (e.g. waiver refiled as a notification) |
 | `mergers party <name>` | All mergers involving a given acquirer or target |
 | `mergers list` | Browse with filters, no query required |
 | `mergers questions [id]` | Browse questionnaire questions |
@@ -66,6 +67,7 @@ Every command supports `--json` for machine-readable output.
 | `--year` | Notification year, e.g. `2025` |
 | `--since` | Notified on or after this date (`YYYY-MM-DD`) |
 | `--until` | Notified on or before this date (`YYYY-MM-DD`) |
+| `--has-related` / `--no-related` | Only mergers that have (or do not have) a related merger |
 | `--limit N` | Max results |
 
 `search` also accepts `--regex` to interpret the query as a Python
