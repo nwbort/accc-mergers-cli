@@ -49,6 +49,7 @@ mergers sync --force
 | `mergers party <name>` | All mergers involving a given acquirer or target |
 | `mergers list` | Browse with filters, no query required |
 | `mergers questions [id]` | Browse questionnaire questions |
+| `mergers noccs [id]` | Browse Notices of Competition Concerns issued in Phase 2 |
 | `mergers industries` | Breakdown of activity by ANZSIC industry |
 | `mergers stats` | Summary statistics |
 

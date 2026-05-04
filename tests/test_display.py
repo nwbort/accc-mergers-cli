@@ -389,6 +389,52 @@ def test_cli_list_has_related_filter(populated_db):
     assert [r["merger_id"] for r in payload] == ["MN-01019"]
 
 
+def test_cli_noccs_for_merger(populated_db):
+    result = runner.invoke(app, ["noccs", "MN-01017", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["merger_id"] == "MN-01017"
+    assert payload["date_iso"] == "2026-03-01"
+    assert payload["sections"][0]["title"] == "Introduction"
+
+
+def test_cli_noccs_list(populated_db):
+    result = runner.invoke(app, ["noccs", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert any(r["merger_id"] == "MN-01017" for r in payload)
+
+
+def test_cli_noccs_search(populated_db):
+    result = runner.invoke(app, ["noccs", "--search", "Phase 2 review", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload
+    assert payload[0]["merger_id"] == "MN-01017"
+
+
+def test_cli_noccs_unknown_merger(populated_db):
+    result = runner.invoke(app, ["noccs", "MN-99999"])
+    assert result.exit_code != 0
+
+
+def test_cli_noccs_renders_text(populated_db):
+    result = runner.invoke(app, ["noccs", "MN-01017"])
+    assert result.exit_code == 0, result.output
+    output = _strip_ansi(result.stdout)
+    assert "Introduction" in output
+    assert "Phase 2 review" in output
+    assert "The acquirer" in output
+
+
+def test_cli_show_includes_nocc_section(populated_db):
+    result = runner.invoke(app, ["show", "MN-01017", "--section", "nocc"])
+    assert result.exit_code == 0, result.output
+    output = _strip_ansi(result.stdout)
+    assert "Notice of Competition Concerns" in output
+    assert "Introduction" in output
+
+
 def test_cli_questions_shows_section_headers(populated_db):
     result = runner.invoke(app, ["questions", "MN-01016"])
     assert result.exit_code == 0, result.output

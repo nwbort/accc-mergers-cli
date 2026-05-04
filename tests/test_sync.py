@@ -44,6 +44,23 @@ def test_sync_indexes_multi_questionnaire(populated_db):
         conn.close()
 
 
+def test_sync_indexes_noccs(populated_db):
+    conn = db.connect()
+    try:
+        n = db.get_nocc(conn, "MN-01017")
+        assert n is not None
+        assert n.date_iso == "2026-03-01"
+        assert n.document_type.startswith("Notice of Competition Concerns")
+        assert n.file_name == "PharmaCo - NOCC summary - 1 March 2026.pdf"
+        assert n.matter_id == "MN-01017"
+        assert len(n.sections) == 2
+        assert n.sections[0].title == "Introduction"
+        assert n.sections[0].blocks[0].number == "1.1"
+        assert n.sections[1].blocks[0].type == "heading"
+    finally:
+        conn.close()
+
+
 def test_sync_indexes_question_sections(populated_db):
     conn = db.connect()
     try:
