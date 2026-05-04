@@ -96,6 +96,22 @@ def row_as_dict(row: Any) -> dict[str, Any]:
     return {k: row[k] for k in row.keys() if k != "raw_json"}
 
 
+_RELATIONSHIP_LABELS: dict[str, str] = {
+    "refiled_as": "Refiled as",
+    "refiled_from": "Refiled from",
+    "related_to": "Related to",
+}
+
+
+def _relationship_label(value: str | None) -> str:
+    if not value:
+        return "Related"
+    key = value.strip().lower()
+    if key in _RELATIONSHIP_LABELS:
+        return _RELATIONSHIP_LABELS[key]
+    return value.replace("_", " ").strip().capitalize() or "Related"
+
+
 def show_merger(merger: Merger, questionnaire: Questionnaire | None, section: str = "all") -> None:
     c = console()
 
@@ -114,6 +130,14 @@ def show_merger(merger: Merger, questionnaire: Questionnaire | None, section: st
         f"Notified: {format_date(merger.effective_notification_datetime)}   "
         f"Determined: {format_date(merger.determination_publication_date)}"
     )
+    if merger.related_merger:
+        rel = merger.related_merger
+        label = _relationship_label(rel.relationship)
+        name = rel.merger_name or ""
+        suffix = f" — {name}" if name else ""
+        header_lines.append(
+            f"[magenta]{label}:[/] [bold cyan]{rel.merger_id}[/]{suffix}"
+        )
     c.print(Panel("\n".join(header_lines), border_style="cyan"))
 
     if section in ("all", "parties"):

@@ -251,6 +251,68 @@ def test_search_questions(populated_db):
     assert rows[0]["merger_id"] == "MN-01016"
 
 
+def test_related_merger_field_round_trips(populated_db):
+    conn = db.connect()
+    try:
+        merger = db.get_merger(conn, "MN-01019")
+    finally:
+        conn.close()
+    assert merger.related_merger is not None
+    assert merger.related_merger.merger_id == "MN-01016"
+    assert merger.related_merger.relationship == "refiled_as"
+
+
+def test_related_mergers_forward_link(populated_db):
+    conn = db.connect()
+    try:
+        rows = db.related_mergers(conn, "MN-01019")
+    finally:
+        conn.close()
+    assert _ids(rows) == ["MN-01016"]
+
+
+def test_related_mergers_reverse_link(populated_db):
+    conn = db.connect()
+    try:
+        rows = db.related_mergers(conn, "MN-01016")
+    finally:
+        conn.close()
+    assert _ids(rows) == ["MN-01019"]
+
+
+def test_related_mergers_none(populated_db):
+    conn = db.connect()
+    try:
+        rows = db.related_mergers(conn, "MN-01017")
+    finally:
+        conn.close()
+    assert rows == []
+
+
+def test_filter_has_related(populated_db):
+    conn = db.connect()
+    try:
+        rows = db.list_mergers(
+            conn, SearchFilters(has_related=True, limit=10)
+        )
+    finally:
+        conn.close()
+    assert _ids(rows) == ["MN-01019"]
+
+
+def test_filter_no_related(populated_db):
+    conn = db.connect()
+    try:
+        rows = db.list_mergers(
+            conn, SearchFilters(has_related=False, limit=10)
+        )
+    finally:
+        conn.close()
+    ids = _ids(rows)
+    assert "MN-01019" not in ids
+    assert "MN-01016" in ids
+
+
 def test_search_questions_across_all_questionnaires(populated_db):
     conn = db.connect()
     try:
