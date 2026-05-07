@@ -161,3 +161,26 @@ def test_base_url_default_when_env_unset(monkeypatch):
 def test_base_url_env_override(monkeypatch):
     monkeypatch.setenv(sync.BASE_URL_ENV, "https://example.com/cli")
     assert sync.base_url() == "https://example.com/cli"
+
+
+def test_sync_with_explicit_local_path(temp_cache, tmp_path):
+    root = tmp_path / "local-data"
+    write_bundle_tree(root)
+
+    result = sync.sync(source=str(root))
+
+    assert result.changed is True
+    assert result.mergers == 4
+
+
+def test_sync_source_takes_precedence_over_env(temp_cache, tmp_path, monkeypatch):
+    good = tmp_path / "good"
+    bad = tmp_path / "bad"
+    write_bundle_tree(good)
+    bad.mkdir()
+    monkeypatch.setenv(sync.BASE_URL_ENV, bad.as_uri())
+
+    result = sync.sync(source=str(good))
+
+    assert result.changed is True
+    assert result.mergers == 4

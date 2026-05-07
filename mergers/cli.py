@@ -67,7 +67,9 @@ def _auto_sync_if_needed() -> None:
     _run_sync()
 
 
-def _run_sync(force: bool = False, verbose: bool = False) -> sync.SyncResult:
+def _run_sync(
+    force: bool = False, verbose: bool = False, source: str | None = None
+) -> sync.SyncResult:
     c = display.console()
     with Progress(
         SpinnerColumn(),
@@ -76,7 +78,7 @@ def _run_sync(force: bool = False, verbose: bool = False) -> sync.SyncResult:
     ) as progress:
         task_id = progress.add_task("Syncing merger data", total=None)
         try:
-            result = sync.sync(force=force)
+            result = sync.sync(force=force, source=source)
         except sync.SyncError as exc:
             progress.remove_task(task_id)
             c.print(f"[red]Sync failed:[/] {exc}")
@@ -111,9 +113,17 @@ def sync_cmd(
     verbose: bool = typer.Option(
         False, "--verbose", help="Show bundle version and UTC timestamp."
     ),
+    source: Optional[str] = typer.Option(
+        None,
+        "--source",
+        help=(
+            "Load bundle files from this location instead of GitHub. "
+            "Accepts a local directory path, a file:// URI, or an http(s):// URL."
+        ),
+    ),
 ) -> None:
-    """Download and index the latest data from GitHub."""
-    _run_sync(force=force, verbose=verbose)
+    """Download and index the latest data from GitHub (or a local path with --source)."""
+    _run_sync(force=force, verbose=verbose, source=source)
 
 
 @app.command(name="status")
