@@ -182,15 +182,20 @@ def _require_manifest_fields(manifest: dict[str, Any]) -> None:
         )
 
 
-def sync(force: bool = False) -> SyncResult:
+def sync(force: bool = False, source: str | None = None) -> SyncResult:
     """Run the full manifest/bundle sync flow.
 
     Fetches ``cli-manifest.json`` first; if the bundle hash matches the
     locally cached manifest and ``force`` is False, the local index is
     already up to date. Otherwise fetches and verifies ``cli-bundle.json``,
     rebuilds the SQLite index, and updates the cached manifest.
+
+    ``source`` overrides the base URL for this call only (takes precedence
+    over the ``ACCC_MERGERS_BASE_URL`` environment variable).  Accepts the
+    same forms as the env var: an ``http://``/``https://`` URL, a
+    ``file://`` URI, or a plain local directory path.
     """
-    base = base_url()
+    base = source or base_url()
     manifest_url = _join_url(base, MANIFEST_FILENAME)
     bundle_url = _join_url(base, BUNDLE_FILENAME)
     merger_manifest_url = _join_url(base, MERGER_MANIFEST_FILENAME)

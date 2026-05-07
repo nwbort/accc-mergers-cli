@@ -50,6 +50,7 @@ need to parse results programmatically.
 |---|---|
 | `mergers sync` | Refresh the local cache from GitHub |
 | `mergers sync --force` | Force a full re-download |
+| `mergers sync --source <path>` | Index from a local directory or URL instead of GitHub |
 | `mergers search <query>` | Full-text search |
 | `mergers search <pattern> --regex` | Python regex search instead of FTS |
 | `mergers search <query> --snippets` | Search with inline match excerpts (recommended for first-pass research) |

@@ -62,6 +62,7 @@ mergers sync --force
 |---|---|
 | `mergers sync` | Download and index the latest data |
 | `mergers sync --force` | Re-download and reindex even if the bundle hash matches |
+| `mergers sync --source <path>` | Index from a local directory (or URL) instead of GitHub |
 | `mergers status` | Version, generation time, and age of the local cache |
 | `mergers search <query>` | Full-text search of descriptions and determinations |
 | `mergers show <id>` | Full detail on a single merger |
@@ -114,9 +115,17 @@ Sync fetches `cli-manifest.json` from the upstream repo (~270 bytes) and only
 downloads the full bundle (`cli-bundle.json`, ~1.6 MB) when its SHA-256 has
 changed. A no-op sync is therefore a single HTTP request.
 
-Set `ACCC_MERGERS_BASE_URL` to point at a different source (e.g. a fork or a
-local `file://` path) — useful for development against a local checkout of
-`accc-mergers/data/output/cli/`.
+To sync from a local directory (useful on servers without access to GitHub),
+pass `--source` directly:
+
+```bash
+mergers sync --source /path/to/accc-mergers/data/output/cli
+```
+
+`--source` accepts a local directory path, a `file://` URI, or any
+`http(s)://` URL.  It takes precedence over the `ACCC_MERGERS_BASE_URL`
+environment variable, which can also be used to redirect all sync calls
+globally.
 
 ## Running tests
 
