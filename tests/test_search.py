@@ -170,17 +170,18 @@ def test_search_regex_matches(populated_db):
     conn = db.connect()
     try:
         pattern = re.compile(r"oncology", re.IGNORECASE)
-        rows = db.search_regex(conn, pattern, SearchFilters(limit=10))
+        rows, total = db.search_regex(conn, pattern, SearchFilters(limit=10))
     finally:
         conn.close()
     assert _ids(rows) == ["MN-01017"]
+    assert total == 1
 
 
 def test_search_regex_respects_filters(populated_db):
     conn = db.connect()
     try:
         pattern = re.compile(r".+", re.IGNORECASE)
-        rows = db.search_regex(
+        rows, total = db.search_regex(
             conn, pattern, SearchFilters(outcome="approved", limit=10)
         )
     finally:
@@ -320,3 +321,145 @@ def test_search_questions_across_all_questionnaires(populated_db):
     finally:
         conn.close()
     assert any(r["merger_id"] == "MN-01017" for r in rows)
+
+
+# --- New tests for enhancements ---
+
+def test_search_with_snippets_returns_fts_snippet(populated_db):
+    conn = db.connect()
+    try:
+        rows = db.search(conn, "beverage", SearchFilters(limit=10), snippets=True)
+    finally:
+        conn.close()
+    assert rows
+    assert "fts_snippet" in rows[0].keys()
+    assert rows[0]["fts_snippet"]  # non-empty snippet
+
+
+def test_search_regex_returns_total_count(populated_db):
+    conn = db.connect()
+    try:
+        pattern = re.compile(r"oncology", re.IGNORECASE)
+        rows, total = db.search_regex(conn, pattern, SearchFilters(limit=10))
+    finally:
+        conn.close()
+    assert total == 1
+    assert _ids(rows) == ["MN-01017"]
+
+
+def test_search_regex_total_count_independent_of_limit(populated_db):
+    """Total count reflects all matches even when fewer are returned."""
+    conn = db.connect()
+    try:
+        pattern = re.compile(r".+", re.IGNORECASE)
+        rows, total = db.search_regex(conn, pattern, SearchFilters(limit=1))
+    finally:
+        conn.close()
+    assert len(rows) == 1
+    assert total == 4  # all four fixture mergers match .+
+
+
+def test_count_search(populated_db):
+    conn = db.connect()
+    try:
+        total = db.count_search(conn, "beverage", SearchFilters())
+    finally:
+        conn.close()
+    assert total >= 1
+
+
+def test_count_list_mergers(populated_db):
+    conn = db.connect()
+    try:
+        total = db.count_list_mergers(conn, SearchFilters(limit=1))
+    finally:
+        conn.close()
+    assert total == 4  # all four fixture mergers
+
+
+def test_count_list_mergers_with_filter(populated_db):
+    conn = db.connect()
+    try:
+        total = db.count_list_mergers(conn, SearchFilters(outcome="approved", limit=1))
+    finally:
+        conn.close()
+    assert total == 2  # MN-01016 and MN-01019
+
+
+def test_count_mergers_by_party(populated_db):
+    conn = db.connect()
+    try:
+        total = db.count_mergers_by_party(conn, "asahi")
+    finally:
+        conn.close()
+    assert total == 1
+
+
+def test_search_section_reasons_finds_reasons_text(populated_db):
+    conn = db.connect()
+    try:
+        rows = db.search(
+            conn, "logistics providers", SearchFilters(limit=10, section="reasons")
+        )
+    finally:
+        conn.close()
+    # "logistics providers" appears in MN-01016's reasons-for-determination text
+    assert "MN-01016" in _ids(rows)
+
+
+def test_search_section_description_excludes_reasons_text(populated_db):
+    conn = db.connect()
+    try:
+        rows = db.search(
+            conn, "logistics providers", SearchFilters(limit=10, section="description")
+        )
+    finally:
+        conn.close()
+    # "logistics providers" is only in reasons, not in merger_description
+    assert "MN-01016" not in _ids(rows)
+
+
+def test_search_regex_section_reasons(populated_db):
+    conn = db.connect()
+    try:
+        pattern = re.compile(r"geographic scope", re.IGNORECASE)
+        rows, total = db.search_regex(
+            conn, pattern, SearchFilters(limit=10, section="reasons")
+        )
+    finally:
+        conn.close()
+    assert "MN-01016" in _ids(rows)
+
+
+def test_search_regex_section_description_excludes_reasons(populated_db):
+    conn = db.connect()
+    try:
+        # "geographic scope" is only in determination_reasons, not merger_description
+        pattern = re.compile(r"geographic scope", re.IGNORECASE)
+        rows, total = db.search_regex(
+            conn, pattern, SearchFilters(limit=10, section="description")
+        )
+    finally:
+        conn.close()
+    assert "MN-01016" not in _ids(rows)
+
+
+def test_extract_regex_snippet_marks_match(populated_db):
+    conn = db.connect()
+    try:
+        row = conn.execute(
+            """
+            SELECT m.*, mc.merger_description, mc.determination_reasons,
+                   mc.determination_overlap, mc.all_determination_text
+            FROM mergers m
+            LEFT JOIN merger_content mc ON mc.merger_id = m.merger_id
+            WHERE m.merger_id = 'MN-01016'
+            """
+        ).fetchone()
+    finally:
+        conn.close()
+    pattern = re.compile(r"logistics providers", re.IGNORECASE)
+    snippet = db.extract_regex_snippet(row, pattern)
+    assert snippet is not None
+    assert "⟪" in snippet and "⟫" in snippet
+    assert "logistics providers" in snippet

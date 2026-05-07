@@ -57,7 +57,8 @@ def test_cli_search_json(populated_db):
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    assert any(r["merger_id"] == "MN-01016" for r in payload)
+    assert "total_matches" in payload
+    assert any(r["merger_id"] == "MN-01016" for r in payload["results"])
 
 
 def test_cli_show_json(populated_db):
@@ -76,14 +77,14 @@ def test_cli_list_phase2(populated_db):
     result = runner.invoke(app, ["list", "--phase", "2", "--json"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    assert [r["merger_id"] for r in payload] == ["MN-01017"]
+    assert [r["merger_id"] for r in payload["results"]] == ["MN-01017"]
 
 
 def test_cli_list_phase0_means_waivers(populated_db):
     result = runner.invoke(app, ["list", "--phase", "0", "--json"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    assert [r["merger_id"] for r in payload] == ["MN-01019"]
+    assert [r["merger_id"] for r in payload["results"]] == ["MN-01019"]
 
 
 def test_cli_industries_json(populated_db):
@@ -251,7 +252,7 @@ def test_cli_party_finds_acquirer(populated_db):
     result = runner.invoke(app, ["party", "asahi", "--json"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    assert [r["merger_id"] for r in payload] == ["MN-01016"]
+    assert [r["merger_id"] for r in payload["results"]] == ["MN-01016"]
 
 
 def test_cli_party_role_filter(populated_db):
@@ -260,7 +261,8 @@ def test_cli_party_role_filter(populated_db):
         app, ["party", "pharmaco", "--role", "target", "--json"]
     )
     assert result.exit_code == 0, result.output
-    assert json.loads(result.stdout) == []
+    payload = json.loads(result.stdout)
+    assert payload["results"] == []
 
 
 def test_cli_search_since_until(populated_db):
@@ -278,7 +280,7 @@ def test_cli_search_since_until(populated_db):
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    ids = [r["merger_id"] for r in payload]
+    ids = [r["merger_id"] for r in payload["results"]]
     assert "MN-01017" in ids
     assert "MN-01019" not in ids  # 2024 notification is excluded
 
@@ -297,7 +299,7 @@ def test_cli_search_regex(populated_db):
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    assert [r["merger_id"] for r in payload] == ["MN-01017"]
+    assert [r["merger_id"] for r in payload["results"]] == ["MN-01017"]
 
 
 def test_cli_search_rejects_invalid_regex(populated_db):
@@ -386,7 +388,7 @@ def test_cli_list_has_related_filter(populated_db):
     result = runner.invoke(app, ["list", "--has-related", "--json"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    assert [r["merger_id"] for r in payload] == ["MN-01019"]
+    assert [r["merger_id"] for r in payload["results"]] == ["MN-01019"]
 
 
 def test_cli_noccs_for_merger(populated_db):
@@ -440,3 +442,117 @@ def test_cli_questions_shows_section_headers(populated_db):
     assert result.exit_code == 0, result.output
     output = _strip_ansi(result.stdout)
     assert "Questions for all respondents" in output
+
+
+# --- New tests for enhancements ---
+
+def test_cli_search_shows_result_count(populated_db):
+    result = runner.invoke(app, ["search", "beverage"])
+    assert result.exit_code == 0, result.output
+    output = _strip_ansi(result.stdout)
+    # Should contain some count indication
+    assert "result" in output.lower()
+
+
+def test_cli_search_shows_truncation_warning(populated_db):
+    result = runner.invoke(app, ["search", "acquisition OR beverage OR pharmaceutical OR fuel", "--limit", "1"])
+    assert result.exit_code == 0, result.output
+    output = _strip_ansi(result.stdout)
+    assert "Showing 1 of" in output
+
+
+def test_cli_list_shows_result_count(populated_db):
+    result = runner.invoke(app, ["list"])
+    assert result.exit_code == 0, result.output
+    output = _strip_ansi(result.stdout)
+    assert "result" in output.lower()
+
+
+def test_cli_search_json_has_total_matches(populated_db):
+    result = runner.invoke(app, ["search", "beverage", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert "total_matches" in payload
+    assert isinstance(payload["total_matches"], int)
+    assert payload["total_matches"] >= 1
+
+
+def test_cli_list_json_has_total_matches(populated_db):
+    result = runner.invoke(app, ["list", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert "total_matches" in payload
+    assert payload["total_matches"] == 4
+
+
+def test_cli_party_json_has_total_matches(populated_db):
+    result = runner.invoke(app, ["party", "asahi", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert "total_matches" in payload
+    assert payload["total_matches"] == 1
+
+
+def test_cli_search_snippets_flag(populated_db):
+    result = runner.invoke(app, ["search", "beverage", "--snippets"])
+    assert result.exit_code == 0, result.output
+    output = _strip_ansi(result.stdout)
+    assert "MN-01016" in output
+
+
+def test_cli_search_snippets_json(populated_db):
+    result = runner.invoke(app, ["search", "beverage", "--snippets", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    # At least one result should have a snippets key
+    results = payload["results"]
+    assert results
+    assert "snippets" in results[0]
+
+
+def test_cli_search_section_reasons(populated_db):
+    result = runner.invoke(app, ["search", "logistics providers", "--section", "reasons", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert any(r["merger_id"] == "MN-01016" for r in payload["results"])
+
+
+def test_cli_search_section_excludes_other_fields(populated_db):
+    # "logistics providers" is not in merger_description, only in reasons
+    result = runner.invoke(
+        app, ["search", "logistics providers", "--section", "description", "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert not any(r["merger_id"] == "MN-01016" for r in payload["results"])
+
+
+def test_cli_search_regex_snippets_json(populated_db):
+    result = runner.invoke(
+        app, ["search", r"oncolog\w+", "--regex", "--snippets", "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    results = payload["results"]
+    assert results
+    assert "snippets" in results[0]
+    assert results[0]["snippets"]  # non-empty list
+
+
+def test_cli_show_json_includes_determination_text(populated_db):
+    result = runner.invoke(app, ["show", "MN-01016", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert "all_determination_text" in payload
+    assert payload["all_determination_text"]  # non-empty
+    assert "determination_reasons" in payload
+    assert payload["determination_reasons"]  # non-empty
+
+
+def test_cli_show_section_reasons_fallback(populated_db):
+    """MN-01018 has no determination sections; --section reasons should give informative output."""
+    result = runner.invoke(app, ["show", "MN-01018", "--section", "reasons"])
+    assert result.exit_code == 0, result.output
+    output = _strip_ansi(result.stdout)
+    # Should not be completely empty — either a fallback panel or an informative message
+    assert "MN-01018" in output
