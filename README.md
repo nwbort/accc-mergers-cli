@@ -10,6 +10,27 @@ indexed locally with SQLite FTS5.
 
 ## Installation
 
+### Recommended: uv
+
+```bash
+uv tool install git+https://github.com/nwbort/accc-mergers-cli
+```
+
+[uv](https://docs.astral.sh/uv/) installs the tool in an isolated environment
+and puts the `mergers` command on your PATH. If you don't have uv yet:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+### Alternative: pipx
+
+```bash
+pipx install git+https://github.com/nwbort/accc-mergers-cli
+```
+
+### From source
+
 ```bash
 git clone https://github.com/nwbort/accc-mergers-cli
 cd accc-mergers-cli
