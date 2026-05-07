@@ -25,6 +25,22 @@ Use this tool when the user asks any of:
 - What are the most-scrutinised industries?
 - Details of a particular merger (by `MN-XXXXX` ID or party name).
 
+## Installation
+
+Before running the first `mergers` command in a session, check whether the CLI is available:
+
+```bash
+mergers --version
+```
+
+If the command is not found, install it with uv:
+
+```bash
+uv tool install git+https://github.com/nwbort/accc-mergers-cli
+```
+
+After installing, run `mergers sync` to populate the local cache before querying.
+
 ## Command reference
 
 All commands accept `--json` for machine-readable output — use this when you
