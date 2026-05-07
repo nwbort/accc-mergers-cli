@@ -152,6 +152,9 @@ def status_cmd() -> None:
     c.print(f"Last sync:      {age_display}")
 
 
+_SEARCH_SECTIONS = {"all", "reasons", "overlap", "description", "parties"}
+
+
 def _parse_filters(
     outcome: str | None,
     industry: str | None,
@@ -162,6 +165,7 @@ def _parse_filters(
     since: str | None = None,
     until: str | None = None,
     has_related: bool | None = None,
+    section: str | None = None,
 ) -> SearchFilters:
     if outcome is not None:
         allowed = {"approved", "denied", "phase2", "pending"}
@@ -175,6 +179,10 @@ def _parse_filters(
     until = _validate_iso_date(until, "--until")
     if since and until and since > until:
         raise typer.BadParameter("--since must be on or before --until")
+    if section is not None and section not in _SEARCH_SECTIONS:
+        raise typer.BadParameter(
+            f"--section must be one of {sorted(_SEARCH_SECTIONS)}"
+        )
     return SearchFilters(
         outcome=outcome.lower() if outcome else None,
         industry=industry,
@@ -185,6 +193,7 @@ def _parse_filters(
         until=until,
         has_related=has_related,
         limit=limit,
+        section=section if section and section != "all" else None,
     )
 
 
@@ -229,6 +238,19 @@ def search(
         help="Only include mergers that have (or do not have) a related merger.",
     ),
     limit: int = typer.Option(10, "--limit", help="Max results."),
+    snippets: bool = typer.Option(
+        False,
+        "--snippets",
+        help="Print a short excerpt showing where the query matches in each result.",
+    ),
+    section: Optional[str] = typer.Option(
+        None,
+        "--section",
+        help=(
+            "Restrict the search to a specific content section: "
+            "all | reasons | overlap | description | parties"
+        ),
+    ),
     json_output: bool = typer.Option(
         False, "--json", help="Output raw JSON."
     ),
@@ -245,6 +267,7 @@ def search(
         since=since,
         until=until,
         has_related=has_related,
+        section=section,
     )
 
     conn = _with_connection()
@@ -254,21 +277,51 @@ def search(
                 pattern = re.compile(query, re.IGNORECASE | re.DOTALL)
             except re.error as exc:
                 raise typer.BadParameter(f"Invalid regex: {exc}")
-            rows = db.search_regex(conn, pattern, filters)
+            rows, total = db.search_regex(conn, pattern, filters)
         else:
-            rows = db.search(conn, query, filters)
+            rows = db.search(conn, query, filters, snippets=snippets)
+            total = db.count_search(conn, query, filters)
     finally:
         conn.close()
 
     if json_output:
-        display.print_json([display.row_as_dict(r) for r in rows])
+        result_list = [display.row_as_dict(r) for r in rows]
+        if snippets:
+            for i, row in enumerate(rows):
+                if regex:
+                    snip = db.extract_regex_snippet(row, pattern, filters.section)
+                else:
+                    snip = row["fts_snippet"] if "fts_snippet" in row.keys() else None
+                result_list[i]["snippets"] = [snip] if snip else []
+        display.print_json({"total_matches": total, "results": result_list})
         return
 
     if not rows:
         display.console().print("[yellow]No results.[/]")
         return
 
-    display.console().print(display.render_results_table(rows))
+    c = display.console()
+    if snippets:
+        snip_map: dict[str, str | None] = {}
+        for row in rows:
+            if regex:
+                snip_map[row["merger_id"]] = db.extract_regex_snippet(
+                    row, pattern, filters.section
+                )
+            else:
+                val = row["fts_snippet"] if "fts_snippet" in row.keys() else None
+                snip_map[row["merger_id"]] = val
+        display.render_results_with_snippets(rows, snip_map)
+    else:
+        c.print(display.render_results_table(rows))
+
+    shown = len(rows)
+    if total > shown:
+        c.print(
+            f"[dim]Showing {shown} of {total} results. Use --limit to see more.[/]"
+        )
+    else:
+        c.print(f"[dim]{shown} result{'s' if shown != 1 else ''}.[/]")
 
 
 @app.command()
@@ -320,7 +373,14 @@ def show(
         raise typer.Exit(code=1)
 
     if json_output:
-        display.print_json(merger.raw)
+        payload = dict(merger.raw)
+        # Augment with computed text fields that may be absent from the raw bundle.
+        payload["all_determination_text"] = merger.all_determination_text()
+        payload["determination_reasons"] = (
+            merger.section_text("Reasons for determination")
+            or merger.all_determination_text()
+        )
+        display.print_json(payload)
         return
 
     display.show_merger(merger, questionnaire, section=section, nocc=nocc)
@@ -479,19 +539,16 @@ def party(
         has_related=has_related,
     )
 
+    role_norm = role.lower() if role else None
     conn = _with_connection()
     try:
-        rows = db.mergers_by_party(
-            conn,
-            name,
-            filters=filters,
-            role=role.lower() if role else None,
-        )
+        rows = db.mergers_by_party(conn, name, filters=filters, role=role_norm)
+        total = db.count_mergers_by_party(conn, name, filters=filters, role=role_norm)
     finally:
         conn.close()
 
     if json_output:
-        display.print_json([display.row_as_dict(r) for r in rows])
+        display.print_json({"total_matches": total, "results": [display.row_as_dict(r) for r in rows]})
         return
 
     if not rows:
@@ -500,9 +557,13 @@ def party(
         )
         return
 
-    display.console().print(
-        display.render_results_table(rows, title=f"Mergers involving '{name}'")
-    )
+    c = display.console()
+    c.print(display.render_results_table(rows, title=f"Mergers involving '{name}'"))
+    shown = len(rows)
+    if total > shown:
+        c.print(f"[dim]Showing {shown} of {total} results. Use --limit to see more.[/]")
+    else:
+        c.print(f"[dim]{shown} result{'s' if shown != 1 else ''}.[/]")
 
 
 @app.command(name="list")
@@ -554,18 +615,25 @@ def list_cmd(
     conn = _with_connection()
     try:
         rows = db.list_mergers(conn, filters, sort=sort)
+        total = db.count_list_mergers(conn, filters)
     finally:
         conn.close()
 
     if json_output:
-        display.print_json([display.row_as_dict(r) for r in rows])
+        display.print_json({"total_matches": total, "results": [display.row_as_dict(r) for r in rows]})
         return
 
     if not rows:
         display.console().print("[yellow]No mergers match those filters.[/]")
         return
 
-    display.console().print(display.render_results_table(rows))
+    c = display.console()
+    c.print(display.render_results_table(rows))
+    shown = len(rows)
+    if total > shown:
+        c.print(f"[dim]Showing {shown} of {total} results. Use --limit to see more.[/]")
+    else:
+        c.print(f"[dim]{shown} result{'s' if shown != 1 else ''}.[/]")
 
 
 @app.command()

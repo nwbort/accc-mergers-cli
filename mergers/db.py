@@ -11,6 +11,103 @@ from typing import Any, Iterable
 
 from .models import Merger, Nocc, NoccBlock, NoccSection, Questionnaire
 
+# Matches FTS5 operator tokens or special characters that indicate the caller
+# has already written a structured FTS5 expression.  When absent the query is
+# treated as a plain phrase and wrapped in FTS5 double-quotes.
+_FTS5_OPERATOR_RE = re.compile(r'\b(?:OR|AND|NOT|NEAR)\b|["*{(^]')
+
+# Maps --section names to the FTS5 column(s) to restrict the query to.
+_SECTION_FTS_COLUMNS: dict[str, str] = {
+    "reasons": "determination_reasons",
+    "overlap": "determination_overlap",
+    "description": "merger_description",
+    "parties": "merger_name acquirers_text targets_text",
+}
+
+# Maps --section names to the row columns used for regex haystack construction.
+_SECTION_REGEX_FIELDS: dict[str, list[str]] = {
+    "reasons": ["determination_reasons"],
+    "overlap": ["determination_overlap"],
+    "description": ["merger_description"],
+    "parties": ["merger_name", "acquirers_text", "targets_text"],
+}
+
+
+def _build_fts_query(query: str, section: str | None = None) -> str:
+    """Return an FTS5 MATCH expression for *query*, optionally column-scoped.
+
+    The query is passed through as-is so that FTS5 operator syntax (OR, AND,
+    NEAR, phrase quotes, etc.) works naturally.  Callers wanting exact phrase
+    matching should wrap the query in FTS5 double-quotes themselves, e.g.
+    ``'"conglomerate effects"'``.
+
+    If *section* is given, the query is prefixed with an FTS5 column filter
+    so only the relevant content column(s) are searched.
+    """
+    fts_q = query
+    if section and section != "all":
+        cols = _SECTION_FTS_COLUMNS.get(section)
+        if cols:
+            # Wrap in parens so the column filter covers the entire expression,
+            # not just the first token.
+            fts_q = f"{{{cols}}}:({fts_q})"
+    return fts_q
+
+
+def _regex_haystack(row: sqlite3.Row, section: str | None) -> str:
+    """Build the text string that a regex pattern should be tested against."""
+    if section and section != "all":
+        fields = _SECTION_REGEX_FIELDS.get(section, [])
+        return "\n".join(row[f] or "" for f in fields if f in row.keys())
+    return "\n".join(
+        row[f] or ""
+        for f in (
+            "merger_name",
+            "acquirers_text",
+            "targets_text",
+            "industries_text",
+            "merger_description",
+            "determination_reasons",
+            "determination_overlap",
+            "all_determination_text",
+        )
+        if f in row.keys()
+    )
+
+
+# Sentinel used to mark a missing column (sqlite3.Row doesn't support `in`).
+_MISSING = object()
+
+
+def extract_regex_snippet(
+    row: sqlite3.Row,
+    pattern: re.Pattern[str],
+    section: str | None = None,
+    context_chars: int = 150,
+) -> str | None:
+    """Return a short excerpt around the first match of *pattern* in *row*.
+
+    Returns ``None`` if the pattern does not match the relevant haystack.
+    Matches are wrapped with ``⟪`` / ``⟫`` so callers can highlight them.
+    """
+    haystack = _regex_haystack(row, section)
+    m = pattern.search(haystack)
+    if not m:
+        return None
+    start = max(0, m.start() - context_chars)
+    end = min(len(haystack), m.end() + context_chars)
+    prefix = "…" if start > 0 else ""
+    suffix = "…" if end < len(haystack) else ""
+    before = haystack[start : m.start()]
+    matched = haystack[m.start() : m.end()]
+    after = haystack[m.end() : end]
+    # Strip leading/trailing whitespace from boundary text
+    if prefix:
+        before = before.lstrip()
+    if suffix:
+        after = after.rstrip()
+    return f"{prefix}{before}⟪{matched}⟫{after}{suffix}"
+
 CACHE_DIR = Path.home() / ".accc-mergers"
 DB_PATH = CACHE_DIR / "db.sqlite"
 LAST_SYNC_PATH = CACHE_DIR / "last_sync.txt"
@@ -309,6 +406,7 @@ class SearchFilters:
     until: str | None = None
     has_related: bool | None = None
     limit: int = 10
+    section: str | None = None  # restrict search to a content section
 
 
 def _outcome_where(outcome: str) -> tuple[str, list[Any]]:
@@ -372,16 +470,26 @@ def _apply_filters(
 
 
 def search(
-    conn: sqlite3.Connection, query: str, filters: SearchFilters
+    conn: sqlite3.Connection,
+    query: str,
+    filters: SearchFilters,
+    *,
+    snippets: bool = False,
 ) -> list[sqlite3.Row]:
+    fts_q = _build_fts_query(query, filters.section)
     extra_where: list[str] = []
-    params: list[Any] = [query]
+    params: list[Any] = [fts_q]
     _apply_filters(filters, extra_where, params)
     where = ""
     if extra_where:
         where = " AND " + " AND ".join(extra_where)
+    snippet_col = (
+        ", snippet(merger_content, -1, '⟪', '⟫', '…', 20) AS fts_snippet"
+        if snippets
+        else ""
+    )
     sql = f"""
-        SELECT m.*, bm25(merger_content) AS rank
+        SELECT m.*, bm25(merger_content) AS rank{snippet_col}
         FROM merger_content
         JOIN mergers m ON m.merger_id = merger_content.merger_id
         WHERE merger_content MATCH ?{where}
@@ -390,6 +498,37 @@ def search(
     """
     params.append(filters.limit)
     return conn.execute(sql, params).fetchall()
+
+
+def count_search(conn: sqlite3.Connection, query: str, filters: SearchFilters) -> int:
+    """Return the total number of FTS matches for *query* (ignores limit)."""
+    fts_q = _build_fts_query(query, filters.section)
+    extra_where: list[str] = []
+    params: list[Any] = [fts_q]
+    _apply_filters(filters, extra_where, params)
+    where = ""
+    if extra_where:
+        where = " AND " + " AND ".join(extra_where)
+    sql = f"""
+        SELECT COUNT(*) AS n
+        FROM merger_content
+        JOIN mergers m ON m.merger_id = merger_content.merger_id
+        WHERE merger_content MATCH ?{where}
+    """
+    row = conn.execute(sql, params).fetchone()
+    return int(row["n"]) if row else 0
+
+
+def count_list_mergers(conn: sqlite3.Connection, filters: SearchFilters) -> int:
+    """Return the total number of mergers matching *filters* (ignores limit)."""
+    extra_where: list[str] = []
+    params: list[Any] = []
+    _apply_filters(filters, extra_where, params)
+    where = ""
+    if extra_where:
+        where = " WHERE " + " AND ".join(extra_where)
+    row = conn.execute(f"SELECT COUNT(*) AS n FROM mergers m{where}", params).fetchone()
+    return int(row["n"]) if row else 0
 
 
 def list_mergers(
@@ -706,6 +845,36 @@ def mergers_by_party(
     return conn.execute(sql, params).fetchall()
 
 
+def count_mergers_by_party(
+    conn: sqlite3.Connection,
+    name: str,
+    filters: SearchFilters | None = None,
+    role: str | None = None,
+) -> int:
+    """Return the total number of party-name matches (ignores limit)."""
+    filters = filters or SearchFilters(limit=100)
+    extra_where: list[str] = []
+    params: list[Any] = []
+    _apply_filters(filters, extra_where, params)
+    needle = f"%{name.lower()}%"
+    if role == "acquirer":
+        extra_where.append("LOWER(m.acquirers_text) LIKE ?")
+        params.append(needle)
+    elif role == "target":
+        extra_where.append("LOWER(m.targets_text) LIKE ?")
+        params.append(needle)
+    else:
+        extra_where.append(
+            "(LOWER(m.acquirers_text) LIKE ? OR LOWER(m.targets_text) LIKE ?)"
+        )
+        params.extend([needle, needle])
+    where = " WHERE " + " AND ".join(extra_where)
+    row = conn.execute(
+        f"SELECT COUNT(*) AS n FROM mergers m{where}", params
+    ).fetchone()
+    return int(row["n"]) if row else 0
+
+
 def related_mergers(
     conn: sqlite3.Connection, merger_id: str
 ) -> list[sqlite3.Row]:
@@ -751,12 +920,15 @@ def search_regex(
     conn: sqlite3.Connection,
     pattern: re.Pattern[str],
     filters: SearchFilters,
-) -> list[sqlite3.Row]:
+) -> tuple[list[sqlite3.Row], int]:
     """Scan indexed merger text with a Python regex.
 
     Bypasses FTS — applies structured filters via SQL, then tests the
     compiled pattern against the content columns. Ordering follows
     ``notification_date DESC``.
+
+    Returns ``(limited_results, total_match_count)`` so callers can detect
+    truncation without a second scan.
     """
     extra_where: list[str] = []
     params: list[Any] = []
@@ -776,19 +948,8 @@ def search_regex(
 
     matches: list[sqlite3.Row] = []
     for row in rows:
-        haystack_parts = [
-            row["merger_name"] or "",
-            row["acquirers_text"] or "",
-            row["targets_text"] or "",
-            row["industries_text"] or "",
-            row["merger_description"] or "",
-            row["determination_reasons"] or "",
-            row["determination_overlap"] or "",
-            row["all_determination_text"] or "",
-        ]
-        haystack = "\n".join(haystack_parts)
+        haystack = _regex_haystack(row, filters.section)
         if pattern.search(haystack):
             matches.append(row)
-            if len(matches) >= filters.limit:
-                break
-    return matches
+    total = len(matches)
+    return matches[: filters.limit], total
