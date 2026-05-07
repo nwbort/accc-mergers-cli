@@ -206,8 +206,6 @@ def _render_description(merger: Merger) -> None:
 
 def _render_determination_sections(merger: Merger, section: str) -> None:
     sections = merger.determination_sections()
-    if not sections:
-        return
     c = console()
 
     filter_map = {
@@ -216,18 +214,35 @@ def _render_determination_sections(merger: Merger, section: str) -> None:
     }
     target = filter_map.get(section)
 
-    seen: set[str] = set()
-    for s in sections:
-        if not s.content.strip():
-            continue
-        key = s.item.strip().lower()
-        if target and key != target:
-            continue
-        dedup_key = f"{key}::{s.content[:120]}"
-        if dedup_key in seen:
-            continue
-        seen.add(dedup_key)
-        c.print(Panel(s.content.strip(), title=s.item, border_style="magenta"))
+    rendered = False
+    if sections:
+        seen: set[str] = set()
+        for s in sections:
+            if not s.content.strip():
+                continue
+            key = s.item.strip().lower()
+            if target and key != target:
+                continue
+            dedup_key = f"{key}::{s.content[:120]}"
+            if dedup_key in seen:
+                continue
+            seen.add(dedup_key)
+            c.print(Panel(s.content.strip(), title=s.item, border_style="magenta"))
+            rendered = True
+
+    if not rendered and section == "reasons":
+        all_text = merger.all_determination_text()
+        if all_text:
+            c.print(Panel(all_text.strip(), title="Determination (full text)", border_style="magenta"))
+            c.print(
+                f"[dim]Note: no structured 'Reasons for determination' available; "
+                f"showing full determination text.[/]"
+            )
+        else:
+            c.print(
+                f"[yellow]No reasons text available for this merger. "
+                f"Try `mergers show {merger.merger_id}` to see the full record.[/]"
+            )
 
 
 _MISSING = object()
@@ -689,6 +704,45 @@ def warn_stale_cache(age_days: float) -> None:
         f"[yellow]Warning:[/] local cache is {age_days:.1f} days old — "
         "run `mergers sync` to refresh."
     )
+
+
+def _render_snippet_markup(raw: str) -> str:
+    """Convert a snippet string with ⟪…⟫ match markers to Rich markup.
+
+    Any Rich-special characters in the surrounding text are escaped so they
+    are displayed literally.
+    """
+    from rich.markup import escape
+
+    open_m, close_m = "⟪", "⟫"
+    parts = raw.split(open_m)
+    result = escape(parts[0])
+    for part in parts[1:]:
+        inside_out = part.split(close_m, 1)
+        if len(inside_out) == 2:
+            result += f"[bold]{escape(inside_out[0])}[/bold]{escape(inside_out[1])}"
+        else:
+            result += f"[bold]{escape(inside_out[0])}[/bold]"
+    return result
+
+
+def render_results_with_snippets(
+    rows: list[Any],
+    snippets: dict[str, str | None],
+) -> None:
+    """Print each result as a brief text block with an optional excerpt below it."""
+    c = console()
+    for row in rows:
+        merger_id, name, determination, _phase, _industry, date = render_row(row)
+        style = outcome_style(determination)
+        c.print(
+            f"  [bold cyan]{merger_id}[/]  {name}  "
+            f"[{style}]{determination or 'Pending'}[/]  [dim]{date}[/]"
+        )
+        snip = snippets.get(row["merger_id"])
+        if snip:
+            c.print(f"  [dim italic]{_render_snippet_markup(snip)}[/]")
+        c.print()
 
 
 def print_json(payload: Any) -> None:
