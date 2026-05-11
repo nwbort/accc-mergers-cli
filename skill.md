@@ -157,22 +157,25 @@ linked matter.
 
 ## Workflow tips
 
-1. Start broad with `mergers search "<keywords>" --snippets` to get a short
+1. If `mergers sync` fails because you can't access the `raw.githubusercontent.com`,
+   you can try cloning the `nwbort/accc-mergers` repo and using the
+   `data/output/cli` as the source for `mergers sync`.
+3. Start broad with `mergers search "<keywords>" --snippets` to get a short
    list of candidate IDs with inline context — this replaces the need to open
    each result individually.
-2. If the result count footer says results were truncated, re-run with
+4. If the result count footer says results were truncated, re-run with
    `--limit <n>` to see the full set.
-3. For each candidate of interest, call `mergers show <id> --section reasons`
+5. For each candidate of interest, call `mergers show <id> --section reasons`
    to pull only the ACCC's reasoning. If no structured reasons exist the CLI
    falls back to the full determination text automatically.
-4. Use `--section reasons` on `search` to restrict matches to the ACCC's
+6. Use `--section reasons` on `search` to restrict matches to the ACCC's
    reasoning specifically, filtering out incidental mentions in party
    descriptions: `mergers search "<issue>" --section reasons --snippets`.
-5. Combine with `mergers industries --show "<name>"` when you want every
+7. Combine with `mergers industries --show "<name>"` when you want every
    deal in a narrow sub-market.
-6. Use `mergers questions --search "<issue>"` to discover which past matters
+8. Use `mergers questions --search "<issue>"` to discover which past matters
    raised the same question the user is asking about.
-7. To follow a waiver→notification chain, check the `related_merger` field
+9. To follow a waiver→notification chain, check the `related_merger` field
    in `mergers show <id> --json`. Use `--has-related` to filter search or
    list results to only mergers with a linked matter.
 
