@@ -41,6 +41,10 @@ uv tool install git+https://github.com/nwbort/accc-mergers-cli
 
 After installing, run `mergers sync` to populate the local cache before querying.
 
+If `mergers sync` fails because you can't access the `raw.githubusercontent.com`, you can
+try cloning the `nwbort/accc-mergers` repo and using the `data/output/cli` as the `source`
+for `mergers sync`.
+
 ## Command reference
 
 All commands accept `--json` for machine-readable output — use this when you
