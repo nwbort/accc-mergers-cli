@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from mergers import db, sync
-from tests.fixtures import write_bundle_tree
+from tests.fixtures import write_dist_tree
 
 
 @pytest.fixture
@@ -28,7 +28,7 @@ def temp_cache(tmp_path, monkeypatch):
 @pytest.fixture
 def fixture_tree(tmp_path: Path, monkeypatch) -> Path:
     root = tmp_path / "cli-data"
-    write_bundle_tree(root)
+    write_dist_tree(root)
     monkeypatch.setenv(sync.BASE_URL_ENV, root.as_uri())
     return root
 

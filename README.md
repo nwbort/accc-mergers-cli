@@ -5,8 +5,8 @@ determinations, find similar cases by industry or issue, read the ACCC's
 reasoning, and browse questionnaire questions — all from your terminal.
 
 Data is pulled from the public
-[`nwbort/accc-mergers`](https://github.com/nwbort/accc-mergers) repository and
-indexed locally with SQLite FTS5.
+[`nwbort/accc-mergers`](https://github.com/nwbort/accc-mergers) repository as
+a pre-built SQLite + FTS5 database, so no client-side indexing is required.
 
 ## Installation
 
@@ -60,9 +60,9 @@ mergers sync --force
 
 | Command | Purpose |
 |---|---|
-| `mergers sync` | Download and index the latest data |
-| `mergers sync --force` | Re-download and reindex even if the bundle hash matches |
-| `mergers sync --source <path>` | Index from a local directory (or URL) instead of GitHub |
+| `mergers sync` | Download the latest pre-built database |
+| `mergers sync --force` | Re-download even if the database hash matches |
+| `mergers sync --source <path>` | Sync from a local directory (or URL) instead of GitHub |
 | `mergers status` | Version, generation time, and age of the local cache |
 | `mergers search <query>` | Full-text search of descriptions and determinations |
 | `mergers show <id>` | Full detail on a single merger |
@@ -111,15 +111,19 @@ Supports bash, zsh, fish and PowerShell via Typer.
 The first run of any command populates `~/.accc-mergers/db.sqlite`. After 7
 days the CLI warns that the cache is stale — run `mergers sync` to refresh.
 
-Sync fetches `cli-manifest.json` from the upstream repo (~270 bytes) and only
-downloads the full bundle (`cli-bundle.json`, ~1.6 MB) when its SHA-256 has
-changed. A no-op sync is therefore a single HTTP request.
+Sync fetches `cli-manifest.json` from the upstream repo's `cli-dist` branch
+(a few hundred bytes) and only downloads the full SQLite database
+(`cli.sqlite`) when its SHA-256 has changed. A no-op sync is therefore a
+single HTTP request.
+
+The manifest also carries a `schema_version`; the CLI refuses to install a
+database whose schema it doesn't know how to read, and prompts you to upgrade.
 
 To sync from a local directory (useful on servers without access to GitHub),
 pass `--source` directly:
 
 ```bash
-mergers sync --source /path/to/accc-mergers/data/output/cli
+mergers sync --source /path/to/cli-dist
 ```
 
 `--source` accepts a local directory path, a `file://` URI, or any

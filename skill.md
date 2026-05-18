@@ -7,11 +7,12 @@ description: Query the ACCC merger register — past determinations, industry pr
 
 ## What the tool does
 
-`mergers` is a local CLI that queries a SQLite cache of the ACCC merger
-register, sourced from the public `nwbort/accc-mergers` GitHub repository. It
-covers every notified merger and waiver with full determination text,
-questionnaire questions, ANZSIC industry classifications, and editorial
-commentary. Full-text search uses SQLite FTS5 with BM25 ranking.
+`mergers` is a local CLI that queries a pre-built SQLite database of the
+ACCC merger register, sourced from the public `nwbort/accc-mergers` GitHub
+repository (the `cli-dist` branch). It covers every notified merger and
+waiver with full determination text, questionnaire questions, ANZSIC
+industry classifications, and editorial commentary. Full-text search uses
+SQLite FTS5 with BM25 ranking.
 
 ## When to use it
 
@@ -41,9 +42,10 @@ uv tool install git+https://github.com/nwbort/accc-mergers-cli
 
 After installing, run `mergers sync` to populate the local cache before querying.
 
-If `mergers sync` fails because you can't access the `raw.githubusercontent.com`, you can
-try cloning the `nwbort/accc-mergers` repo and using the `data/output/cli` as the `source`
-for `mergers sync`.
+If `mergers sync` fails because you can't access `raw.githubusercontent.com`,
+you can try cloning the `nwbort/accc-mergers` repo (checking out the
+`cli-dist` branch, which holds `cli-manifest.json` and `cli.sqlite`) and
+pointing `mergers sync --source` at that directory.
 
 ## Command reference
 
@@ -52,9 +54,9 @@ need to parse results programmatically.
 
 | Command | Purpose |
 |---|---|
-| `mergers sync` | Refresh the local cache from GitHub |
+| `mergers sync` | Refresh the local database from GitHub |
 | `mergers sync --force` | Force a full re-download |
-| `mergers sync --source <path>` | Index from a local directory or URL instead of GitHub |
+| `mergers sync --source <path>` | Sync from a local directory or URL instead of GitHub |
 | `mergers search <query>` | Full-text search |
 | `mergers search <pattern> --regex` | Python regex search instead of FTS |
 | `mergers search <query> --snippets` | Search with inline match excerpts (recommended for first-pass research) |
@@ -161,9 +163,9 @@ linked matter.
 
 ## Workflow tips
 
-1. If `mergers sync` fails because you can't access the `raw.githubusercontent.com`,
-   you can try cloning the `nwbort/accc-mergers` repo and using the
-   `data/output/cli` as the source for `mergers sync`.
+1. If `mergers sync` fails because you can't access `raw.githubusercontent.com`,
+   try cloning the `nwbort/accc-mergers` repo, checking out the `cli-dist`
+   branch, and using that directory as the `--source` for `mergers sync`.
 3. Start broad with `mergers search "<keywords>" --snippets` to get a short
    list of candidate IDs with inline context — this replaces the need to open
    each result individually.

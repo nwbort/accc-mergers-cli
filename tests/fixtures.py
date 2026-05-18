@@ -366,7 +366,7 @@ def _canonical(payload: Any) -> bytes:
     return json.dumps(payload, separators=(",", ":"), sort_keys=False).encode()
 
 
-def write_bundle_tree(
+def write_dist_tree(
     root: Path,
     *,
     mergers: list[dict[str, Any]] | None = None,
@@ -375,14 +375,21 @@ def write_bundle_tree(
     stats: Any = STATS,
     industries: Any = INDUSTRIES,
     version: int = 1,
+    schema_version: int | None = None,
+    manifest_schema_version: int | None = None,
     generated_at: str = "2026-04-18T04:48:02Z",
-    corrupt_bundle: bool = False,
+    bad_sqlite_hash: bool = False,
     fake_merger_count: int | None = None,
 ) -> Path:
-    """Write the three CLI bundle files to ``root`` and return ``root``.
+    """Build a pre-indexed SQLite + manifest pair under ``root``.
 
-    Mirrors the layout of ``nwbort/accc-mergers/data/output/cli/``.
+    Mirrors the layout the upstream ``nwbort/accc-mergers`` repo publishes
+    to its ``cli-dist`` branch: a ``cli.sqlite`` file plus a
+    ``cli-manifest.json`` describing it.
     """
+    from mergers import db
+    from tests._index_builder import build_database
+
     root.mkdir(parents=True, exist_ok=True)
 
     bundle = {
@@ -394,16 +401,23 @@ def write_bundle_tree(
         "stats": stats,
         "industries": industries,
     }
-    bundle_bytes = _canonical(bundle)
-    bundle_sha = hashlib.sha256(bundle_bytes).hexdigest()
-    if corrupt_bundle:
-        bundle_bytes = bundle_bytes + b" "
 
-    per_merger = {m["merger_id"]: hashlib.sha256(_canonical(m)).hexdigest() for m in bundle["mergers"]}
-    per_merger_bytes = _canonical(per_merger)
-    per_merger_sha = hashlib.sha256(per_merger_bytes).hexdigest()
+    sqlite_path = root / "cli.sqlite"
+    build_database(sqlite_path, bundle, schema_version=schema_version)
+
+    sqlite_bytes = sqlite_path.read_bytes()
+    sqlite_sha = hashlib.sha256(sqlite_bytes).hexdigest()
+    if bad_sqlite_hash:
+        sqlite_sha = "0" * 64
+
+    manifest_schema = (
+        db.SCHEMA_VERSION
+        if manifest_schema_version is None
+        else manifest_schema_version
+    )
 
     manifest = {
+        "schema_version": manifest_schema,
         "version": version,
         "generated_at": generated_at,
         "merger_count": (
@@ -411,11 +425,9 @@ def write_bundle_tree(
             if fake_merger_count is not None
             else len(bundle["mergers"])
         ),
-        "bundle_sha256": bundle_sha,
-        "merger_manifest_sha256": per_merger_sha,
+        "sqlite_sha256": sqlite_sha,
+        "sqlite_filename": "cli.sqlite",
     }
 
     (root / "cli-manifest.json").write_bytes(_canonical(manifest))
-    (root / "cli-bundle.json").write_bytes(bundle_bytes)
-    (root / "cli-merger-manifest.json").write_bytes(per_merger_bytes)
     return root

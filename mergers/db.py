@@ -113,6 +113,11 @@ DB_PATH = CACHE_DIR / "db.sqlite"
 LAST_SYNC_PATH = CACHE_DIR / "last_sync.txt"
 STALE_DAYS = 7
 
+# Bumped whenever the upstream-published SQLite schema changes in a way that
+# this CLI can no longer read. The sync flow refuses any manifest whose
+# ``schema_version`` doesn't match this constant.
+SCHEMA_VERSION = 1
+
 
 def ensure_cache_dir() -> None:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -127,248 +132,20 @@ def connect(db_path: Path | None = None) -> sqlite3.Connection:
     return conn
 
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS mergers (
-    merger_id TEXT PRIMARY KEY,
-    merger_name TEXT,
-    status TEXT,
-    stage TEXT,
-    is_waiver INTEGER,
-    acquirers_text TEXT,
-    targets_text TEXT,
-    industries_text TEXT,
-    determination TEXT,
-    phase INTEGER,
-    notification_date TEXT,
-    determination_date TEXT,
-    related_merger_id TEXT,
-    related_relationship TEXT,
-    related_merger_name TEXT,
-    raw_json TEXT
-);
-
-CREATE VIRTUAL TABLE IF NOT EXISTS merger_content USING fts5(
-    merger_id UNINDEXED,
-    merger_name,
-    acquirers_text,
-    targets_text,
-    industries_text,
-    merger_description,
-    determination_reasons,
-    determination_overlap,
-    all_determination_text,
-    tokenize = 'porter unicode61'
-);
-
-CREATE TABLE IF NOT EXISTS questionnaires (
-    merger_id TEXT PRIMARY KEY,
-    deadline TEXT,
-    deadline_iso TEXT,
-    file_name TEXT,
-    questions_count INTEGER,
-    raw_json TEXT,
-    all_questionnaires_json TEXT
-);
-
-CREATE VIRTUAL TABLE IF NOT EXISTS questionnaire_content USING fts5(
-    merger_id UNINDEXED,
-    question_number UNINDEXED,
-    question_text,
-    tokenize = 'porter unicode61'
-);
-
-CREATE TABLE IF NOT EXISTS noccs (
-    merger_id TEXT PRIMARY KEY,
-    matter_id TEXT,
-    date TEXT,
-    date_iso TEXT,
-    document_type TEXT,
-    file_name TEXT,
-    file_path TEXT,
-    raw_json TEXT
-);
-
-CREATE VIRTUAL TABLE IF NOT EXISTS nocc_content USING fts5(
-    merger_id UNINDEXED,
-    section_number UNINDEXED,
-    section_title,
-    block_number UNINDEXED,
-    block_text,
-    tokenize = 'porter unicode61'
-);
-
-CREATE TABLE IF NOT EXISTS meta (
-    key TEXT PRIMARY KEY,
-    value TEXT
-);
-
-CREATE TABLE IF NOT EXISTS stats (
-    key TEXT PRIMARY KEY,
-    value TEXT
-);
-
-CREATE TABLE IF NOT EXISTS industries (
-    key TEXT PRIMARY KEY,
-    value TEXT
-);
-"""
-
-
-def _migrate_schema(conn: sqlite3.Connection) -> None:
-    existing = {row[1] for row in conn.execute("PRAGMA table_info(questionnaires)").fetchall()}
-    for col, defn in [
-        ("deadline_iso", "TEXT"),
-        ("file_name", "TEXT"),
-        ("all_questionnaires_json", "TEXT"),
-    ]:
-        if col not in existing:
-            conn.execute(f"ALTER TABLE questionnaires ADD COLUMN {col} {defn}")
-
-    merger_cols = {row[1] for row in conn.execute("PRAGMA table_info(mergers)").fetchall()}
-    for col, defn in [
-        ("related_merger_id", "TEXT"),
-        ("related_relationship", "TEXT"),
-        ("related_merger_name", "TEXT"),
-    ]:
-        if col not in merger_cols:
-            conn.execute(f"ALTER TABLE mergers ADD COLUMN {col} {defn}")
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS mergers_related_merger_id_idx ON mergers(related_merger_id)"
-    )
-
-
-def init_schema(conn: sqlite3.Connection) -> None:
-    conn.executescript(SCHEMA)
-    _migrate_schema(conn)
-    conn.commit()
-
-
-def clear_mergers(conn: sqlite3.Connection) -> None:
-    conn.executescript(
-        """
-        DELETE FROM mergers;
-        DELETE FROM merger_content;
-        DELETE FROM questionnaires;
-        DELETE FROM questionnaire_content;
-        DELETE FROM noccs;
-        DELETE FROM nocc_content;
-        """
-    )
-    conn.commit()
-
-
-def insert_merger(conn: sqlite3.Connection, merger: Merger) -> None:
-    determination = merger.outcome()
-
-    related = merger.related_merger
-    related_id = related.merger_id if related else None
-    related_relationship = related.relationship if related else None
-    related_name = related.merger_name if related else None
-
-    conn.execute(
-        """
-        INSERT OR REPLACE INTO mergers (
-            merger_id, merger_name, status, stage, is_waiver,
-            acquirers_text, targets_text, industries_text,
-            determination, phase, notification_date, determination_date,
-            related_merger_id, related_relationship, related_merger_name,
-            raw_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            merger.merger_id,
-            merger.merger_name,
-            merger.status,
-            merger.stage,
-            1 if merger.is_waiver else 0,
-            merger.acquirers_text(),
-            merger.targets_text(),
-            merger.industries_text(),
-            determination,
-            merger.phase_number(),
-            merger.effective_notification_datetime,
-            merger.determination_publication_date,
-            related_id,
-            related_relationship,
-            related_name,
-            json.dumps(merger.raw),
-        ),
-    )
-    conn.execute(
-        "DELETE FROM merger_content WHERE merger_id = ?", (merger.merger_id,)
-    )
-    conn.execute(
-        """
-        INSERT INTO merger_content (
-            merger_id, merger_name, acquirers_text, targets_text, industries_text,
-            merger_description, determination_reasons, determination_overlap, all_determination_text
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            merger.merger_id,
-            merger.merger_name,
-            merger.acquirers_text(),
-            merger.targets_text(),
-            merger.industries_text(),
-            merger.merger_description,
-            merger.section_text("Reasons for determination"),
-            merger.section_text("Overlap and relationship between the parties"),
-            merger.all_determination_text(),
-        ),
-    )
-
-
-def insert_questionnaire(conn: sqlite3.Connection, q: Questionnaire) -> None:
-    conn.execute(
-        """
-        INSERT OR REPLACE INTO questionnaires
-        (merger_id, deadline, deadline_iso, file_name, questions_count, raw_json, all_questionnaires_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            q.merger_id,
-            q.deadline,
-            q.deadline_iso,
-            q.file_name,
-            q.questions_count,
-            json.dumps(q.questions),
-            json.dumps(q.all_questionnaires) if q.all_questionnaires else None,
-        ),
-    )
-    conn.execute(
-        "DELETE FROM questionnaire_content WHERE merger_id = ?", (q.merger_id,)
-    )
-    for question in q.questions:
-        number = question.get("number") or question.get("question_number") or ""
-        text = (
-            question.get("text")
-            or question.get("question")
-            or question.get("question_text")
-            or ""
-        )
-        conn.execute(
-            "INSERT INTO questionnaire_content (merger_id, question_number, question_text) VALUES (?, ?, ?)",
-            (q.merger_id, str(number), text),
-        )
-
-
-def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
-    conn.execute(
-        "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, value)
-    )
-
-
-def get_meta(conn: sqlite3.Connection, key: str) -> str | None:
-    row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
-    return row["value"] if row else None
-
-
-def set_stats(conn: sqlite3.Connection, payload: dict[str, Any]) -> None:
-    conn.execute("DELETE FROM stats")
-    conn.execute(
-        "INSERT INTO stats (key, value) VALUES (?, ?)",
-        ("stats", json.dumps(payload)),
-    )
+def read_schema_version(conn: sqlite3.Connection) -> int | None:
+    """Return the ``schema_version`` recorded in the DB's ``meta`` table."""
+    try:
+        row = conn.execute(
+            "SELECT value FROM meta WHERE key = 'schema_version'"
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return None
+    if not row:
+        return None
+    try:
+        return int(row["value"])
+    except (TypeError, ValueError):
+        return None
 
 
 def get_stats(conn: sqlite3.Connection) -> dict[str, Any] | None:
@@ -376,14 +153,6 @@ def get_stats(conn: sqlite3.Connection) -> dict[str, Any] | None:
     if not row:
         return None
     return json.loads(row["value"])
-
-
-def set_industries(conn: sqlite3.Connection, payload: Any) -> None:
-    conn.execute("DELETE FROM industries")
-    conn.execute(
-        "INSERT INTO industries (key, value) VALUES (?, ?)",
-        ("industries", json.dumps(payload)),
-    )
 
 
 def get_industries(conn: sqlite3.Connection) -> Any:
@@ -613,62 +382,6 @@ def list_questionnaires(conn: sqlite3.Connection) -> list[sqlite3.Row]:
         ORDER BY q.deadline DESC NULLS LAST, q.merger_id DESC
         """
     ).fetchall()
-
-
-def insert_nocc(conn: sqlite3.Connection, n: Nocc) -> None:
-    conn.execute(
-        """
-        INSERT OR REPLACE INTO noccs
-        (merger_id, matter_id, date, date_iso, document_type, file_name,
-         file_path, raw_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            n.merger_id,
-            n.matter_id,
-            n.date,
-            n.date_iso,
-            n.document_type,
-            n.file_name,
-            n.file_path,
-            json.dumps(
-                {
-                    "sections": [
-                        {
-                            "number": s.number,
-                            "title": s.title,
-                            "blocks": [
-                                {"number": b.number, "text": b.text, "type": b.type}
-                                for b in s.blocks
-                            ],
-                        }
-                        for s in n.sections
-                    ]
-                }
-            ),
-        ),
-    )
-    conn.execute(
-        "DELETE FROM nocc_content WHERE merger_id = ?", (n.merger_id,)
-    )
-    for section in n.sections:
-        for block in section.blocks:
-            if not (block.text or "").strip():
-                continue
-            conn.execute(
-                """
-                INSERT INTO nocc_content
-                (merger_id, section_number, section_title, block_number, block_text)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    n.merger_id,
-                    str(section.number or ""),
-                    section.title or "",
-                    str(block.number or ""),
-                    block.text,
-                ),
-            )
 
 
 def _nocc_from_row(row: sqlite3.Row, merger_name: str | None = None) -> Nocc:

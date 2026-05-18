@@ -1,9 +1,11 @@
-"""Fetch ACCC merger data from GitHub and index it locally.
+"""Fetch the pre-built CLI SQLite database from upstream and install it locally.
 
-The upstream repo (nwbort/accc-mergers) pre-generates three files under
-``data/output/cli/`` on every data update: ``cli-manifest.json``,
-``cli-bundle.json`` and ``cli-merger-manifest.json``. The CLI consumes those
-files directly instead of scraping ~200 per-merger JSONs.
+The upstream repo (``nwbort/accc-mergers``) publishes a pre-indexed SQLite
+file to its ``cli-dist`` branch on every data update. The CLI just downloads
+that database and verifies its SHA-256; there is no client-side indexing.
+
+The branch is force-pushed (no history kept), so the URLs always point at
+the current build.
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,28 +24,30 @@ from urllib.parse import urlparse, unquote
 import httpx
 
 from . import __version__, db
-from .models import Merger, Nocc, Questionnaire
 
 BASE_URL_ENV = "ACCC_MERGERS_BASE_URL"
 DEFAULT_BASE_URL = (
-    "https://raw.githubusercontent.com/nwbort/accc-mergers/main/"
-    "data/output/cli"
+    "https://raw.githubusercontent.com/nwbort/accc-mergers/cli-dist"
 )
 
 MANIFEST_FILENAME = "cli-manifest.json"
-BUNDLE_FILENAME = "cli-bundle.json"
-MERGER_MANIFEST_FILENAME = "cli-merger-manifest.json"
+SQLITE_FILENAME = "cli.sqlite"
 
-REQUEST_TIMEOUT = 30.0
+REQUEST_TIMEOUT = 60.0
 RETRY_DELAYS = (1.0, 2.0, 4.0)
 USER_AGENT = f"accc-mergers-cli/{__version__}"
 
+REQUIRED_MANIFEST_FIELDS = (
+    "schema_version",
+    "version",
+    "generated_at",
+    "merger_count",
+    "sqlite_sha256",
+)
+
+
 def manifest_cache_path() -> Path:
     return db.CACHE_DIR / MANIFEST_FILENAME
-
-
-def merger_manifest_cache_path() -> Path:
-    return db.CACHE_DIR / MERGER_MANIFEST_FILENAME
 
 
 class SyncError(RuntimeError):
@@ -129,11 +134,6 @@ def _write_cached_manifest(raw: bytes) -> None:
     manifest_cache_path().write_bytes(raw)
 
 
-def _write_cached_merger_manifest(raw: bytes) -> None:
-    db.ensure_cache_dir()
-    merger_manifest_cache_path().write_bytes(raw)
-
-
 def is_cache_fresh() -> bool:
     if not db.LAST_SYNC_PATH.exists():
         return False
@@ -171,24 +171,56 @@ def read_cached_manifest() -> dict[str, Any] | None:
 
 
 def _require_manifest_fields(manifest: dict[str, Any]) -> None:
-    missing = [
-        k
-        for k in ("version", "generated_at", "merger_count", "bundle_sha256")
-        if k not in manifest
-    ]
+    missing = [k for k in REQUIRED_MANIFEST_FIELDS if k not in manifest]
     if missing:
         raise SyncError(
             f"Manifest missing required fields: {', '.join(missing)}"
         )
 
 
-def sync(force: bool = False, source: str | None = None) -> SyncResult:
-    """Run the full manifest/bundle sync flow.
+def _require_schema_version(manifest: dict[str, Any]) -> None:
+    got = manifest.get("schema_version")
+    if got != db.SCHEMA_VERSION:
+        raise SyncError(
+            f"Schema version mismatch: this CLI supports schema_version "
+            f"{db.SCHEMA_VERSION}, but upstream published {got!r}. "
+            "Upgrade the CLI to a version that supports this schema."
+        )
 
-    Fetches ``cli-manifest.json`` first; if the bundle hash matches the
-    locally cached manifest and ``force`` is False, the local index is
-    already up to date. Otherwise fetches and verifies ``cli-bundle.json``,
-    rebuilds the SQLite index, and updates the cached manifest.
+
+def _install_sqlite(content: bytes) -> None:
+    """Atomically write *content* to ``db.DB_PATH``."""
+    db.ensure_cache_dir()
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=".db.sqlite.", suffix=".tmp", dir=str(db.CACHE_DIR)
+    )
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(content)
+        os.replace(tmp_name, db.DB_PATH)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
+def _count_questionnaires(conn) -> int:
+    try:
+        row = conn.execute("SELECT COUNT(*) AS n FROM questionnaires").fetchone()
+    except Exception:
+        return 0
+    return int(row["n"]) if row else 0
+
+
+def sync(force: bool = False, source: str | None = None) -> SyncResult:
+    """Download the latest SQLite database and install it.
+
+    Fetches ``cli-manifest.json`` first; if the SHA-256 matches the locally
+    cached manifest and ``force`` is False, no download is needed. Otherwise
+    fetches and verifies ``cli.sqlite`` and atomically replaces the local
+    database.
 
     ``source`` overrides the base URL for this call only (takes precedence
     over the ``ACCC_MERGERS_BASE_URL`` environment variable).  Accepts the
@@ -197,8 +229,7 @@ def sync(force: bool = False, source: str | None = None) -> SyncResult:
     """
     base = source or base_url()
     manifest_url = _join_url(base, MANIFEST_FILENAME)
-    bundle_url = _join_url(base, BUNDLE_FILENAME)
-    merger_manifest_url = _join_url(base, MERGER_MANIFEST_FILENAME)
+    sqlite_url = _join_url(base, SQLITE_FILENAME)
 
     client = _make_client(base)
     try:
@@ -208,12 +239,13 @@ def sync(force: bool = False, source: str | None = None) -> SyncResult:
         except ValueError as exc:
             raise SyncError(f"Manifest is not valid JSON: {exc}") from exc
         _require_manifest_fields(manifest)
+        _require_schema_version(manifest)
 
         cached = _read_cached_manifest()
-        cached_sha = cached.get("bundle_sha256") if cached else None
+        cached_sha = cached.get("sqlite_sha256") if cached else None
         if (
             not force
-            and cached_sha == manifest["bundle_sha256"]
+            and cached_sha == manifest["sqlite_sha256"]
             and db.DB_PATH.exists()
         ):
             _write_cached_manifest(manifest_bytes)
@@ -221,103 +253,56 @@ def sync(force: bool = False, source: str | None = None) -> SyncResult:
             conn = db.connect()
             try:
                 merger_count = db.count_mergers(conn)
+                q_count = _count_questionnaires(conn)
             finally:
                 conn.close()
             return SyncResult(
                 manifest=manifest,
                 changed=False,
                 mergers=merger_count,
-                questionnaires=0,
+                questionnaires=q_count,
             )
 
-        bundle_bytes = _fetch_bytes(client, bundle_url)
-        actual_sha = hashlib.sha256(bundle_bytes).hexdigest()
-        if actual_sha != manifest["bundle_sha256"]:
+        sqlite_bytes = _fetch_bytes(client, sqlite_url)
+        actual_sha = hashlib.sha256(sqlite_bytes).hexdigest()
+        if actual_sha != manifest["sqlite_sha256"]:
             raise SyncError(
-                "Bundle hash mismatch: manifest expected "
-                f"{manifest['bundle_sha256']}, got {actual_sha}"
+                "SQLite hash mismatch: manifest expected "
+                f"{manifest['sqlite_sha256']}, got {actual_sha}"
             )
 
-        try:
-            bundle = json.loads(bundle_bytes)
-        except ValueError as exc:
-            raise SyncError(f"Bundle is not valid JSON: {exc}") from exc
+        _install_sqlite(sqlite_bytes)
 
-        mergers_list = bundle.get("mergers") or []
-        if len(mergers_list) != manifest["merger_count"]:
+        conn = db.connect()
+        try:
+            db_schema = db.read_schema_version(conn)
+            merger_count = db.count_mergers(conn)
+            q_count = _count_questionnaires(conn)
+        finally:
+            conn.close()
+
+        if db_schema != db.SCHEMA_VERSION:
             raise SyncError(
-                "Bundle merger count mismatch: manifest expected "
-                f"{manifest['merger_count']}, bundle has {len(mergers_list)}"
+                f"Downloaded database reports schema_version {db_schema!r}, "
+                f"CLI expects {db.SCHEMA_VERSION}"
             )
-
-        summary = _persist(bundle)
-
-        try:
-            mm_bytes = _fetch_bytes(client, merger_manifest_url)
-        except SyncError:
-            mm_bytes = None
-        if mm_bytes is not None:
-            expected = manifest.get("merger_manifest_sha256")
-            if expected is None or hashlib.sha256(mm_bytes).hexdigest() == expected:
-                _write_cached_merger_manifest(mm_bytes)
+        if merger_count != manifest["merger_count"]:
+            raise SyncError(
+                "Merger count mismatch: manifest expected "
+                f"{manifest['merger_count']}, database has {merger_count}"
+            )
 
         _write_cached_manifest(manifest_bytes)
         write_last_sync()
         return SyncResult(
             manifest=manifest,
             changed=True,
-            mergers=summary["mergers"],
-            questionnaires=summary["questionnaires"],
+            mergers=merger_count,
+            questionnaires=q_count,
         )
     finally:
         if client is not None:
             client.close()
-
-
-def _persist(bundle: dict[str, Any]) -> dict[str, int]:
-    db.ensure_cache_dir()
-    conn = db.connect()
-    try:
-        db.init_schema(conn)
-        db.clear_mergers(conn)
-
-        merger_count = 0
-        for merger_dict in bundle.get("mergers") or []:
-            merger = Merger.from_dict(merger_dict)
-            if not merger.merger_id:
-                continue
-            db.insert_merger(conn, merger)
-            merger_count += 1
-
-        questionnaires = bundle.get("questionnaires") or {}
-        q_count = 0
-        if isinstance(questionnaires, dict):
-            for mid, q_data in questionnaires.items():
-                if not isinstance(q_data, dict):
-                    continue
-                q = Questionnaire.from_dict(mid, q_data)
-                db.insert_questionnaire(conn, q)
-                q_count += 1
-
-        noccs = bundle.get("noccs") or {}
-        if isinstance(noccs, dict):
-            for mid, n_data in noccs.items():
-                if not isinstance(n_data, dict):
-                    continue
-                db.insert_nocc(conn, Nocc.from_dict(mid, n_data))
-
-        stats = bundle.get("stats")
-        if stats is not None:
-            db.set_stats(conn, stats)
-        industries = bundle.get("industries")
-        if industries is not None:
-            db.set_industries(conn, industries)
-
-        conn.commit()
-    finally:
-        conn.close()
-
-    return {"mergers": merger_count, "questionnaires": q_count}
 
 
 def ensure_cache() -> SyncResult | None:

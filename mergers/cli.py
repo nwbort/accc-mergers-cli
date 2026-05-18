@@ -49,9 +49,7 @@ def _validate_iso_date(value: str | None, flag: str) -> str | None:
 
 
 def _with_connection():
-    conn = db.connect()
-    db.init_schema(conn)
-    return conn
+    return db.connect()
 
 
 def _auto_sync_if_needed() -> None:
@@ -87,11 +85,11 @@ def _run_sync(
     manifest = result.manifest
     if result.changed:
         c.print(
-            f"[green]Indexed {result.mergers} mergers "
+            f"[green]Installed {result.mergers} mergers "
             f"and {result.questionnaires} questionnaires.[/]"
         )
         c.print(
-            f"[dim]Bundle version {manifest.get('version')} · "
+            f"[dim]Data version {manifest.get('version')} · "
             f"generated {manifest.get('generated_at')}[/]"
         )
     else:
@@ -99,7 +97,7 @@ def _run_sync(
         c.print(f"[green]Data up to date (last update {local_ts})[/]")
         if verbose:
             c.print(
-                f"[dim]Bundle version {manifest.get('version')} · "
+                f"[dim]Data version {manifest.get('version')} · "
                 f"generated {manifest.get('generated_at')}[/]"
             )
     return result
@@ -108,21 +106,21 @@ def _run_sync(
 @app.command(name="sync")
 def sync_cmd(
     force: bool = typer.Option(
-        False, "--force", help="Skip the hash check and re-download + reindex."
+        False, "--force", help="Skip the hash check and re-download."
     ),
     verbose: bool = typer.Option(
-        False, "--verbose", help="Show bundle version and UTC timestamp."
+        False, "--verbose", help="Show data version and UTC timestamp."
     ),
     source: Optional[str] = typer.Option(
         None,
         "--source",
         help=(
-            "Load bundle files from this location instead of GitHub. "
+            "Load the manifest and database from this location instead of GitHub. "
             "Accepts a local directory path, a file:// URI, or an http(s):// URL."
         ),
     ),
 ) -> None:
-    """Download and index the latest data from GitHub (or a local path with --source)."""
+    """Download the latest pre-built database from GitHub (or a local path with --source)."""
     _run_sync(force=force, verbose=verbose, source=source)
 
 
@@ -145,7 +143,7 @@ def status_cmd() -> None:
     age_display = f"{age_days:.1f} days ago" if age_days is not None else "—"
 
     if manifest:
-        c.print(f"Bundle version: [bold]{manifest.get('version', '—')}[/]")
+        c.print(f"Data version:   [bold]{manifest.get('version', '—')}[/]")
         c.print(f"Generated at:   {manifest.get('generated_at', '—')}")
         c.print(
             f"Mergers:        {merger_count}"
