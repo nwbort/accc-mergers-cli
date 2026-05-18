@@ -11,7 +11,7 @@ from typing import Optional
 import typer
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from . import db, display, sync
+from . import __version__, db, display, sync
 from .db import SearchFilters
 
 
@@ -32,6 +32,25 @@ app = typer.Typer(
     help="Query the ACCC merger register from your terminal.",
     no_args_is_help=True,
 )
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f"mergers {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _main(
+    version: Optional[bool] = typer.Option(
+        None,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show the version and exit.",
+    ),
+) -> None:
+    pass
 
 
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
