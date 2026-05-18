@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "accc-mergers-cli"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Local CLI for querying the ACCC merger register"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,6 +24,9 @@ dev = [
 
 [project.scripts]
 mergers = "mergers.cli:app"
+
+[tool.setuptools.dynamic]
+version = { attr = "mergers.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["mergers*"]

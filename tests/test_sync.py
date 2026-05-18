@@ -1,4 +1,4 @@
-"""Tests for the manifest + bundle sync path."""
+"""Tests for the manifest + SQLite sync path."""
 
 from __future__ import annotations
 
@@ -7,10 +7,10 @@ from pathlib import Path
 import pytest
 
 from mergers import db, sync
-from tests.fixtures import write_bundle_tree
+from tests.fixtures import write_dist_tree
 
 
-def test_sync_indexes_everything_from_bundle(populated_db):
+def test_sync_installs_database_from_upstream(populated_db):
     conn = db.connect()
     try:
         assert db.count_mergers(conn) == 4
@@ -29,7 +29,7 @@ def test_sync_indexes_everything_from_bundle(populated_db):
         conn.close()
 
 
-def test_sync_indexes_multi_questionnaire(populated_db):
+def test_sync_includes_multi_questionnaire(populated_db):
     conn = db.connect()
     try:
         q = db.get_questionnaire(conn, "MN-01017")
@@ -44,7 +44,7 @@ def test_sync_indexes_multi_questionnaire(populated_db):
         conn.close()
 
 
-def test_sync_indexes_noccs(populated_db):
+def test_sync_includes_noccs(populated_db):
     conn = db.connect()
     try:
         n = db.get_nocc(conn, "MN-01017")
@@ -61,7 +61,7 @@ def test_sync_indexes_noccs(populated_db):
         conn.close()
 
 
-def test_sync_indexes_question_sections(populated_db):
+def test_sync_includes_question_sections(populated_db):
     conn = db.connect()
     try:
         q = db.get_questionnaire(conn, "MN-01016")
@@ -78,13 +78,21 @@ def test_sync_writes_last_sync_timestamp(populated_db):
     assert sync.is_cache_fresh() is True
 
 
-def test_sync_caches_manifest_and_merger_manifest(populated_db):
+def test_sync_caches_manifest(populated_db):
     assert sync.manifest_cache_path().exists()
-    assert sync.merger_manifest_cache_path().exists()
     cached = sync.read_cached_manifest()
     assert cached is not None
     assert cached["merger_count"] == 4
-    assert "bundle_sha256" in cached
+    assert cached["schema_version"] == db.SCHEMA_VERSION
+    assert "sqlite_sha256" in cached
+
+
+def test_sync_records_schema_version_in_db(populated_db):
+    conn = db.connect()
+    try:
+        assert db.read_schema_version(conn) == db.SCHEMA_VERSION
+    finally:
+        conn.close()
 
 
 def test_second_sync_is_a_noop(temp_cache, fixture_tree):
@@ -94,10 +102,10 @@ def test_second_sync_is_a_noop(temp_cache, fixture_tree):
     second = sync.sync()
     assert second.changed is False
     assert second.mergers == 4
-    assert second.manifest["bundle_sha256"] == first.manifest["bundle_sha256"]
+    assert second.manifest["sqlite_sha256"] == first.manifest["sqlite_sha256"]
 
 
-def test_force_sync_reindexes_even_when_hash_matches(temp_cache, fixture_tree):
+def test_force_sync_reinstalls_even_when_hash_matches(temp_cache, fixture_tree):
     first = sync.sync()
     assert first.changed is True
 
@@ -106,30 +114,44 @@ def test_force_sync_reindexes_even_when_hash_matches(temp_cache, fixture_tree):
     assert forced.mergers == 4
 
 
-def test_sync_rejects_bundle_with_bad_hash(temp_cache, tmp_path, monkeypatch):
+def test_sync_rejects_sqlite_with_bad_hash(temp_cache, tmp_path, monkeypatch):
     root = tmp_path / "corrupt"
-    write_bundle_tree(root, corrupt_bundle=True)
+    write_dist_tree(root, bad_sqlite_hash=True)
     monkeypatch.setenv(sync.BASE_URL_ENV, root.as_uri())
 
     with pytest.raises(sync.SyncError, match="hash mismatch"):
         sync.sync()
 
-    # The index must not have been written.
     assert not db.DB_PATH.exists()
 
 
-def test_sync_rejects_bundle_with_wrong_count(temp_cache, tmp_path, monkeypatch):
-    root = tmp_path / "badcount"
-    write_bundle_tree(root, fake_merger_count=999)
+def test_sync_rejects_wrong_schema_version(temp_cache, tmp_path, monkeypatch):
+    root = tmp_path / "wrong-schema"
+    write_dist_tree(
+        root,
+        schema_version=db.SCHEMA_VERSION + 99,
+        manifest_schema_version=db.SCHEMA_VERSION + 99,
+    )
     monkeypatch.setenv(sync.BASE_URL_ENV, root.as_uri())
 
-    with pytest.raises(sync.SyncError, match="merger count mismatch"):
+    with pytest.raises(sync.SyncError, match="[Ss]chema version mismatch"):
+        sync.sync()
+
+    assert not db.DB_PATH.exists()
+
+
+def test_sync_rejects_db_with_wrong_count(temp_cache, tmp_path, monkeypatch):
+    root = tmp_path / "badcount"
+    write_dist_tree(root, fake_merger_count=999)
+    monkeypatch.setenv(sync.BASE_URL_ENV, root.as_uri())
+
+    with pytest.raises(sync.SyncError, match="[Mm]erger count mismatch"):
         sync.sync()
 
 
 def test_sync_tolerates_null_stats_and_industries(temp_cache, tmp_path, monkeypatch):
     root = tmp_path / "nulls"
-    write_bundle_tree(root, stats=None, industries=None)
+    write_dist_tree(root, stats=None, industries=None)
     monkeypatch.setenv(sync.BASE_URL_ENV, root.as_uri())
 
     result = sync.sync()
@@ -165,7 +187,7 @@ def test_base_url_env_override(monkeypatch):
 
 def test_sync_with_explicit_local_path(temp_cache, tmp_path):
     root = tmp_path / "local-data"
-    write_bundle_tree(root)
+    write_dist_tree(root)
 
     result = sync.sync(source=str(root))
 
@@ -176,7 +198,7 @@ def test_sync_with_explicit_local_path(temp_cache, tmp_path):
 def test_sync_source_takes_precedence_over_env(temp_cache, tmp_path, monkeypatch):
     good = tmp_path / "good"
     bad = tmp_path / "bad"
-    write_bundle_tree(good)
+    write_dist_tree(good)
     bad.mkdir()
     monkeypatch.setenv(sync.BASE_URL_ENV, bad.as_uri())
 
