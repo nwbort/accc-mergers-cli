@@ -70,12 +70,18 @@ mergers sync --force
 | `mergers related <id>` | Mergers linked via the 'related merger' field (e.g. waiver refiled as a notification) |
 | `mergers party <name>` | All mergers involving a given acquirer or target |
 | `mergers list` | Browse with filters, no query required |
-| `mergers questions [id]` | Browse questionnaire questions |
+| `mergers new` | Mergers added to the register in the last N days (default 7) |
+| `mergers open <id>` | Open a merger in the browser (mergers.fyi by default, `--accc` for the original page) |
+| `mergers questions [id]` | Browse questionnaire questions (`--search <q>` to grep across all) |
 | `mergers noccs [id]` | Browse Notices of Competition Concerns issued in Phase 2 |
 | `mergers industries` | Breakdown of activity by ANZSIC industry |
-| `mergers stats` | Summary statistics |
+| `mergers stats` | Summary statistics (`--by year\|industry\|acquirer\|outcome\|phase` for grouped counts) |
+| `mergers cache path` | Print the local cache directory |
+| `mergers cache clear` | Delete the local cache so the next command re-syncs |
 
-Every command supports `--json` for machine-readable output.
+Every command supports `--json` for machine-readable output.  `search`,
+`list`, `party` and `new` also support `--csv` and `--md` to print a CSV
+or Markdown table — handy for pasting into spreadsheets or docs.
 
 ## Filters
 
@@ -91,11 +97,24 @@ Every command supports `--json` for machine-readable output.
 | `--since` | Notified on or after this date (`YYYY-MM-DD`) |
 | `--until` | Notified on or before this date (`YYYY-MM-DD`) |
 | `--has-related` / `--no-related` | Only mergers that have (or do not have) a related merger |
+| `--acquirer <name>` | Acquirer name contains this string (case-insensitive) |
+| `--target <name>` | Target name contains this string (case-insensitive) |
 | `--limit N` | Max results |
+
+`list` additionally accepts `--sort date-desc|date-asc|name|duration`
+(default `date-desc`).
 
 `search` also accepts `--regex` to interpret the query as a Python
 regular expression instead of an FTS query. Useful for patterns FTS
 can't express (e.g. `--regex "acqui(re|sition)s?\s+of\s+shares"`).
+By default `search` prints a short matching snippet under each result;
+pass `--no-snippets` to suppress it.  `--section reasons|overlap|description|parties`
+restricts the search (and any `--regex` scan) to a single content section.
+
+`show` accepts `--section determination|reasons|overlap|parties|industries|description|questionnaire|nocc`
+to render only one block of a merger record instead of the full report.
+
+`party` accepts `--role acquirer|target` to restrict to one side of the deal.
 
 ## Shell completion
 

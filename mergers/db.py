@@ -174,6 +174,8 @@ class SearchFilters:
     since: str | None = None
     until: str | None = None
     has_related: bool | None = None
+    acquirer: str | None = None
+    target: str | None = None
     limit: int = 10
     section: str | None = None  # restrict search to a content section
 
@@ -236,6 +238,12 @@ def _apply_filters(
         extra_where.append(
             "(m.related_merger_id IS NULL OR m.related_merger_id = '')"
         )
+    if filters.acquirer:
+        extra_where.append("LOWER(m.acquirers_text) LIKE ?")
+        params.append(f"%{filters.acquirer.lower()}%")
+    if filters.target:
+        extra_where.append("LOWER(m.targets_text) LIKE ?")
+        params.append(f"%{filters.target.lower()}%")
 
 
 def search(
@@ -509,6 +517,98 @@ def mergers_by_industry(
         """,
         (f"%{industry.lower()}%",),
     ).fetchall()
+
+
+STATS_AXES = ("year", "industry", "acquirer", "outcome", "phase")
+
+
+def stats_by_axis(
+    conn: sqlite3.Connection, axis: str, limit: int = 25
+) -> list[dict[str, Any]]:
+    """Group merger counts by a single axis.
+
+    Returns a list of ``{"key": str, "notifications": int, "waivers": int,
+    "approved": int, "phase2": int, "denied": int, "total": int}`` rows,
+    sorted by ``total`` desc.  ``industry`` and ``acquirer`` rows are split
+    on the semicolon separator used in the source data; a merger that lists
+    two industries contributes to both buckets.
+    """
+    if axis not in STATS_AXES:
+        raise ValueError(f"Unknown axis: {axis!r}")
+
+    rows = conn.execute(
+        "SELECT notification_date, industries_text, acquirers_text, "
+        "determination, phase, is_waiver FROM mergers"
+    ).fetchall()
+
+    def _empty() -> dict[str, int]:
+        return {
+            "notifications": 0,
+            "waivers": 0,
+            "approved": 0,
+            "denied": 0,
+            "phase2": 0,
+            "total": 0,
+        }
+
+    agg: dict[str, dict[str, int]] = {}
+
+    def _bump(key: str, row: sqlite3.Row) -> None:
+        entry = agg.setdefault(key, _empty())
+        entry["total"] += 1
+        if row["is_waiver"]:
+            entry["waivers"] += 1
+        else:
+            entry["notifications"] += 1
+        outcome = (row["determination"] or "").lower()
+        if outcome == "approved":
+            entry["approved"] += 1
+        elif outcome in ("denied", "not approved"):
+            entry["denied"] += 1
+        if row["phase"] == 2:
+            entry["phase2"] += 1
+
+    for row in rows:
+        if axis == "year":
+            nd = row["notification_date"] or ""
+            key = nd[:4] if len(nd) >= 4 and nd[:4].isdigit() else "unknown"
+            _bump(key, row)
+        elif axis == "industry":
+            names = [
+                n.strip()
+                for n in (row["industries_text"] or "").split(";")
+                if n.strip()
+            ]
+            for name in names or ["(unknown)"]:
+                _bump(name, row)
+        elif axis == "acquirer":
+            names = [
+                n.strip()
+                for n in (row["acquirers_text"] or "").split(";")
+                if n.strip()
+            ]
+            for name in names or ["(unknown)"]:
+                _bump(name, row)
+        elif axis == "outcome":
+            key = row["determination"] or "Pending"
+            _bump(key, row)
+        elif axis == "phase":
+            if row["is_waiver"]:
+                key = "Waiver"
+            elif row["phase"] is None:
+                key = "Unspecified"
+            else:
+                key = f"Phase {row['phase']}"
+            _bump(key, row)
+
+    ordered = sorted(
+        agg.items(),
+        key=lambda kv: (-kv[1]["total"], kv[0]) if axis != "year" else (kv[0],),
+        reverse=(axis == "year"),
+    )
+    if axis == "year":
+        ordered = sorted(agg.items(), key=lambda kv: kv[0], reverse=True)
+    return [{"key": k, **v} for k, v in ordered[:limit]]
 
 
 def count_mergers(conn: sqlite3.Connection) -> int:
