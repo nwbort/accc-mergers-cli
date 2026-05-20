@@ -1172,6 +1172,26 @@ def new_cmd(
         c.print(f"[dim]{shown} result{'s' if shown != 1 else ''}.[/]")
 
 
+@app.command(name="browse")
+def browse_cmd() -> None:
+    """Launch the interactive TUI to browse mergers (requires the [browse] extra)."""
+    _auto_sync_if_needed()
+    try:
+        from . import tui
+    except ImportError as exc:
+        display.console().print(
+            "[red]The interactive browser requires the optional 'textual' "
+            "dependency.[/]\n"
+            "Install it with one of:\n"
+            "  [cyan]pip install 'accc-mergers-cli[browse]'[/]\n"
+            "  [cyan]uv tool install --with textual git+https://github.com/"
+            "nwbort/accc-mergers-cli[/]\n"
+            f"[dim]Underlying error: {exc}[/]"
+        )
+        raise typer.Exit(code=1)
+    tui.run()
+
+
 cache_app = typer.Typer(
     help="Manage the local cache (~/.accc-mergers/).",
     no_args_is_help=True,
