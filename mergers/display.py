@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import csv
 import datetime as dt
+import io
 import sys
 from typing import Any, Iterable, Sequence
 
@@ -90,6 +92,92 @@ def render_results_table(
             date,
         )
     return table
+
+
+_EXPORT_COLUMNS: Sequence[tuple[str, str]] = (
+    ("merger_id", "ID"),
+    ("merger_name", "Name"),
+    ("determination", "Outcome"),
+    ("phase", "Phase"),
+    ("is_waiver", "Waiver"),
+    ("industries_text", "Industries"),
+    ("acquirers_text", "Acquirers"),
+    ("targets_text", "Targets"),
+    ("notification_date", "Notified"),
+    ("determination_date", "Determined"),
+)
+
+
+def _export_cell(row: Any, key: str) -> str:
+    if key not in row.keys():
+        return ""
+    value = row[key]
+    if value is None:
+        return ""
+    if key == "is_waiver":
+        return "yes" if value else "no"
+    if key == "phase":
+        return f"Phase {value}" if value else ""
+    if key in ("notification_date", "determination_date") and isinstance(value, str):
+        return value[:10]
+    return str(value)
+
+
+def render_results_csv(rows: Iterable[Any]) -> str:
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([header for _, header in _EXPORT_COLUMNS])
+    for row in rows:
+        writer.writerow([_export_cell(row, key) for key, _ in _EXPORT_COLUMNS])
+    return buf.getvalue()
+
+
+def _md_escape(text: str) -> str:
+    return text.replace("|", "\\|").replace("\n", " ").strip()
+
+
+def render_results_markdown(rows: Iterable[Any], title: str | None = None) -> str:
+    headers = [header for _, header in _EXPORT_COLUMNS]
+    lines: list[str] = []
+    if title:
+        lines.append(f"## {title}")
+        lines.append("")
+    lines.append("| " + " | ".join(headers) + " |")
+    lines.append("|" + "|".join(["---"] * len(headers)) + "|")
+    for row in rows:
+        cells = [_md_escape(_export_cell(row, key)) for key, _ in _EXPORT_COLUMNS]
+        lines.append("| " + " | ".join(cells) + " |")
+    return "\n".join(lines) + "\n"
+
+
+def show_stats_by_axis(axis: str, buckets: list[dict[str, Any]]) -> None:
+    c = console()
+    titles = {
+        "year": "Year",
+        "industry": "Industry",
+        "acquirer": "Acquirer",
+        "outcome": "Outcome",
+        "phase": "Phase",
+    }
+    table = Table(title=f"Mergers by {axis}", show_lines=False, expand=True)
+    table.add_column(titles.get(axis, axis), overflow="fold")
+    table.add_column("Total", justify="right", no_wrap=True)
+    table.add_column("Notifications", justify="right", no_wrap=True)
+    table.add_column("Waivers", justify="right", no_wrap=True)
+    table.add_column("Approved", justify="right", no_wrap=True)
+    table.add_column("Denied", justify="right", no_wrap=True)
+    table.add_column("Phase 2", justify="right", no_wrap=True)
+    for entry in buckets:
+        table.add_row(
+            str(entry["key"]),
+            str(entry["total"]),
+            str(entry["notifications"]),
+            str(entry["waivers"]),
+            str(entry["approved"]),
+            str(entry["denied"]),
+            str(entry["phase2"]),
+        )
+    c.print(table)
 
 
 def row_as_dict(row: Any) -> dict[str, Any]:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 import typer
@@ -193,6 +193,8 @@ def _parse_filters(
     until: str | None = None,
     has_related: bool | None = None,
     section: str | None = None,
+    acquirer: str | None = None,
+    target: str | None = None,
 ) -> SearchFilters:
     if outcome is not None:
         allowed = {"approved", "denied", "phase2", "pending"}
@@ -219,6 +221,8 @@ def _parse_filters(
         since=since,
         until=until,
         has_related=has_related,
+        acquirer=acquirer,
+        target=target,
         limit=limit,
         section=section if section and section != "all" else None,
     )
@@ -264,10 +268,20 @@ def search(
         "--has-related/--no-related",
         help="Only include mergers that have (or do not have) a related merger.",
     ),
+    acquirer: Optional[str] = typer.Option(
+        None,
+        "--acquirer",
+        help="Restrict to mergers whose acquirer name contains this string.",
+    ),
+    target: Optional[str] = typer.Option(
+        None,
+        "--target",
+        help="Restrict to mergers whose target name contains this string.",
+    ),
     limit: int = typer.Option(10, "--limit", help="Max results."),
     snippets: bool = typer.Option(
-        False,
-        "--snippets",
+        True,
+        "--snippets/--no-snippets",
         help="Print a short excerpt showing where the query matches in each result.",
     ),
     section: Optional[str] = typer.Option(
@@ -280,6 +294,12 @@ def search(
     ),
     json_output: bool = typer.Option(
         False, "--json", help="Output raw JSON."
+    ),
+    csv_output: bool = typer.Option(
+        False, "--csv", help="Output results as CSV."
+    ),
+    md_output: bool = typer.Option(
+        False, "--md", help="Output results as a Markdown table."
     ),
 ) -> None:
     """Full-text search across merger descriptions and determination text."""
@@ -295,6 +315,8 @@ def search(
         until=until,
         has_related=has_related,
         section=section,
+        acquirer=acquirer,
+        target=target,
     )
 
     conn = _with_connection()
@@ -321,6 +343,14 @@ def search(
                     snip = row["fts_snippet"] if "fts_snippet" in row.keys() else None
                 result_list[i]["snippets"] = [snip] if snip else []
         display.print_json({"total_matches": total, "results": result_list})
+        return
+
+    if csv_output:
+        typer.echo(display.render_results_csv(rows), nl=False)
+        return
+
+    if md_output:
+        typer.echo(display.render_results_markdown(rows), nl=False)
         return
 
     if not rows:
@@ -547,6 +577,12 @@ def party(
     ),
     limit: int = typer.Option(50, "--limit"),
     json_output: bool = typer.Option(False, "--json"),
+    csv_output: bool = typer.Option(
+        False, "--csv", help="Output results as CSV."
+    ),
+    md_output: bool = typer.Option(
+        False, "--md", help="Output results as a Markdown table."
+    ),
 ) -> None:
     """List mergers involving a given acquirer or target."""
     _auto_sync_if_needed()
@@ -576,6 +612,17 @@ def party(
 
     if json_output:
         display.print_json({"total_matches": total, "results": [display.row_as_dict(r) for r in rows]})
+        return
+
+    if csv_output:
+        typer.echo(display.render_results_csv(rows), nl=False)
+        return
+
+    if md_output:
+        typer.echo(
+            display.render_results_markdown(rows, title=f"Mergers involving '{name}'"),
+            nl=False,
+        )
         return
 
     if not rows:
@@ -613,6 +660,16 @@ def list_cmd(
         "--has-related/--no-related",
         help="Only include mergers that have (or do not have) a related merger.",
     ),
+    acquirer: Optional[str] = typer.Option(
+        None,
+        "--acquirer",
+        help="Restrict to mergers whose acquirer name contains this string.",
+    ),
+    target: Optional[str] = typer.Option(
+        None,
+        "--target",
+        help="Restrict to mergers whose target name contains this string.",
+    ),
     limit: int = typer.Option(50, "--limit"),
     sort: str = typer.Option(
         "date-desc",
@@ -620,6 +677,12 @@ def list_cmd(
         help="date-asc | date-desc | name | duration",
     ),
     json_output: bool = typer.Option(False, "--json"),
+    csv_output: bool = typer.Option(
+        False, "--csv", help="Output results as CSV."
+    ),
+    md_output: bool = typer.Option(
+        False, "--md", help="Output results as a Markdown table."
+    ),
 ) -> None:
     """Browse mergers with filters, no search query required."""
     _auto_sync_if_needed()
@@ -633,6 +696,8 @@ def list_cmd(
         since=since,
         until=until,
         has_related=has_related,
+        acquirer=acquirer,
+        target=target,
     )
 
     allowed_sort = {"date-asc", "date-desc", "name", "duration"}
@@ -648,6 +713,14 @@ def list_cmd(
 
     if json_output:
         display.print_json({"total_matches": total, "results": [display.row_as_dict(r) for r in rows]})
+        return
+
+    if csv_output:
+        typer.echo(display.render_results_csv(rows), nl=False)
+        return
+
+    if md_output:
+        typer.echo(display.render_results_markdown(rows), nl=False)
         return
 
     if not rows:
@@ -907,10 +980,41 @@ def industries(
 
 @app.command()
 def stats(
+    by: Optional[str] = typer.Option(
+        None,
+        "--by",
+        help=(
+            "Group counts by an axis instead of showing summary stats: "
+            "year | industry | acquirer | outcome | phase"
+        ),
+    ),
+    limit: int = typer.Option(
+        25, "--limit", help="Max buckets when used with --by."
+    ),
     json_output: bool = typer.Option(False, "--json"),
 ) -> None:
     """Print summary statistics from the cached stats.json."""
     _auto_sync_if_needed()
+
+    if by is not None:
+        if by not in db.STATS_AXES:
+            raise typer.BadParameter(
+                f"--by must be one of {list(db.STATS_AXES)}"
+            )
+        conn = _with_connection()
+        try:
+            buckets = db.stats_by_axis(conn, by, limit=limit)
+        finally:
+            conn.close()
+        if json_output:
+            display.print_json({"axis": by, "buckets": buckets})
+            return
+        if not buckets:
+            display.console().print("[yellow]No data to group.[/]")
+            return
+        display.show_stats_by_axis(by, buckets)
+        return
+
     conn = _with_connection()
     try:
         payload = db.get_stats(conn)
@@ -922,6 +1026,186 @@ def stats(
         return
 
     display.show_stats(payload or {})
+
+
+_FYI_BASE_URL = "https://mergers.fyi/mergers"
+
+
+@app.command(name="open")
+def open_cmd(
+    merger_id: str = typer.Argument(..., help="Merger ID, e.g. MN-01016."),
+    accc: bool = typer.Option(
+        False,
+        "--accc",
+        help="Open the original ACCC register page instead of mergers.fyi.",
+    ),
+    print_only: bool = typer.Option(
+        False,
+        "--print",
+        help="Print the URL instead of opening a browser.",
+    ),
+) -> None:
+    """Open a merger in the browser (mergers.fyi by default, --accc for the ACCC page)."""
+    _auto_sync_if_needed()
+    normalized = db.normalize_merger_id(merger_id)
+
+    if accc:
+        conn = _with_connection()
+        try:
+            merger = db.get_merger(conn, normalized)
+        finally:
+            conn.close()
+        if not merger:
+            display.console().print(
+                f"[red]No merger found with ID '{merger_id}'.[/]"
+            )
+            raise typer.Exit(code=1)
+        url = merger.raw.get("url") if hasattr(merger, "raw") else None
+        if not url:
+            display.console().print(
+                f"[red]No ACCC URL recorded for {normalized}.[/]"
+            )
+            raise typer.Exit(code=1)
+    else:
+        url = f"{_FYI_BASE_URL}/{normalized}"
+
+    if print_only:
+        typer.echo(url)
+        return
+
+    display.console().print(f"Opening [cyan]{url}[/]")
+    typer.launch(url)
+
+
+@app.command(name="new")
+def new_cmd(
+    days: int = typer.Option(
+        7, "--days", help="Look back this many days (default 7)."
+    ),
+    by: str = typer.Option(
+        "notified",
+        "--by",
+        help="Which date to filter on: notified | determined.",
+    ),
+    outcome: Optional[str] = typer.Option(None, "--outcome"),
+    industry: Optional[str] = typer.Option(None, "--industry"),
+    phase: Optional[int] = typer.Option(None, "--phase"),
+    waiver: Optional[bool] = typer.Option(None, "--waiver/--no-waiver"),
+    limit: int = typer.Option(50, "--limit"),
+    json_output: bool = typer.Option(False, "--json"),
+    csv_output: bool = typer.Option(False, "--csv"),
+    md_output: bool = typer.Option(False, "--md"),
+) -> None:
+    """Show mergers added to the register in the last N days."""
+    _auto_sync_if_needed()
+    if days <= 0:
+        raise typer.BadParameter("--days must be a positive integer")
+    if by not in {"notified", "determined"}:
+        raise typer.BadParameter("--by must be 'notified' or 'determined'")
+
+    since_dt = datetime.now().date() - timedelta(days=days)
+    since_iso = since_dt.isoformat()
+
+    if by == "notified":
+        filters = _parse_filters(
+            outcome, industry, phase, waiver, None, limit,
+            since=since_iso,
+        )
+        conn = _with_connection()
+        try:
+            rows = db.list_mergers(conn, filters, sort="date-desc")
+            total = db.count_list_mergers(conn, filters)
+        finally:
+            conn.close()
+    else:
+        # Filter by determination_date manually since SearchFilters' since/until
+        # apply to notification_date.
+        filters = _parse_filters(
+            outcome, industry, phase, waiver, None, limit=10_000
+        )
+        conn = _with_connection()
+        try:
+            all_rows = db.list_mergers(conn, filters, sort="date-desc")
+        finally:
+            conn.close()
+        filtered = [
+            r for r in all_rows
+            if (r["determination_date"] or "")[:10] >= since_iso
+        ]
+        total = len(filtered)
+        rows = filtered[:limit]
+
+    title = (
+        f"Mergers {by} in the last {days} day{'s' if days != 1 else ''} "
+        f"(since {since_iso})"
+    )
+
+    if json_output:
+        display.print_json(
+            {
+                "since": since_iso,
+                "days": days,
+                "by": by,
+                "total_matches": total,
+                "results": [display.row_as_dict(r) for r in rows],
+            }
+        )
+        return
+
+    if csv_output:
+        typer.echo(display.render_results_csv(rows), nl=False)
+        return
+
+    if md_output:
+        typer.echo(display.render_results_markdown(rows, title=title), nl=False)
+        return
+
+    c = display.console()
+    if not rows:
+        c.print(f"[yellow]No mergers {by} since {since_iso}.[/]")
+        return
+    c.print(display.render_results_table(rows, title=title))
+    shown = len(rows)
+    if total > shown:
+        c.print(f"[dim]Showing {shown} of {total} results. Use --limit to see more.[/]")
+    else:
+        c.print(f"[dim]{shown} result{'s' if shown != 1 else ''}.[/]")
+
+
+cache_app = typer.Typer(
+    help="Manage the local cache (~/.accc-mergers/).",
+    no_args_is_help=True,
+)
+app.add_typer(cache_app, name="cache")
+
+
+@cache_app.command("path")
+def cache_path_cmd() -> None:
+    """Print the path to the local cache directory."""
+    typer.echo(str(db.CACHE_DIR))
+
+
+@cache_app.command("clear")
+def cache_clear_cmd(
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Skip the confirmation prompt."
+    ),
+) -> None:
+    """Delete the local cache so the next command re-syncs from scratch."""
+    c = display.console()
+    if not db.CACHE_DIR.exists():
+        c.print(f"[yellow]Nothing to clear: {db.CACHE_DIR} does not exist.[/]")
+        return
+    if not yes:
+        confirm = typer.confirm(
+            f"Delete {db.CACHE_DIR} and everything in it?", default=False
+        )
+        if not confirm:
+            c.print("[yellow]Aborted.[/]")
+            raise typer.Exit(code=1)
+    import shutil
+    shutil.rmtree(db.CACHE_DIR)
+    c.print(f"[green]Removed {db.CACHE_DIR}.[/]")
 
 
 def main() -> None:
