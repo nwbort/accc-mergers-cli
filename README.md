@@ -70,6 +70,7 @@ mergers sync --force
 | `mergers related <id>` | Mergers linked via the 'related merger' field (e.g. waiver refiled as a notification) |
 | `mergers party <name>` | All mergers involving a given acquirer or target |
 | `mergers list` | Browse with filters, no query required |
+| `mergers browse` | Interactive TUI browser (requires the `[browse]` extra) |
 | `mergers new` | Mergers added to the register in the last N days (default 7) |
 | `mergers open <id>` | Open a merger in the browser (mergers.fyi by default, `--accc` for the original page) |
 | `mergers questions [id]` | Browse questionnaire questions (`--search <q>` to grep across all) |
@@ -115,6 +116,39 @@ restricts the search (and any `--regex` scan) to a single content section.
 to render only one block of a merger record instead of the full report.
 
 `party` accepts `--role acquirer|target` to restrict to one side of the deal.
+
+## Interactive browser
+
+For repeated exploration, install with the optional `[browse]` extra to get
+the `mergers browse` TUI:
+
+```bash
+uv tool install --with textual git+https://github.com/nwbort/accc-mergers-cli
+# or
+pip install 'accc-mergers-cli[browse]'
+```
+
+Then run:
+
+```bash
+mergers browse
+```
+
+The browser shows a filterable result list on the left and the full merger
+detail on the right. Type into the filter input to combine free-text
+search with structured filters, e.g. `outcome:approved industry:beverage
+warehouse`. Recognised filter keys are `outcome`, `industry`, `acquirer`,
+`target`, `phase`, `year`, `since`, `until`, `waiver`, `section`.
+
+| Key | Action |
+|---|---|
+| `↑` / `↓` | Move through the list |
+| `/` | Focus the filter input |
+| `Esc` | Return focus to the list |
+| `o` | Open the highlighted merger on mergers.fyi |
+| `Shift+O` | Open the original ACCC register page |
+| `?` | Toggle the help overlay |
+| `q` | Quit |
 
 ## Shell completion
 
