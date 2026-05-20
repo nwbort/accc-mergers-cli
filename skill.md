@@ -50,28 +50,44 @@ pointing `mergers sync --source` at that directory.
 ## Command reference
 
 All commands accept `--json` for machine-readable output — use this when you
-need to parse results programmatically.
+need to parse results programmatically.  `search`, `list`, `party`, and
+`new` additionally accept `--csv` and `--md` to emit a CSV or Markdown
+table (handy when the user wants something they can paste into a sheet
+or document).
 
 | Command | Purpose |
 |---|---|
 | `mergers sync` | Refresh the local database from GitHub |
 | `mergers sync --force` | Force a full re-download |
 | `mergers sync --source <path>` | Sync from a local directory or URL instead of GitHub |
-| `mergers search <query>` | Full-text search |
+| `mergers search <query>` | Full-text search (prints snippets by default) |
 | `mergers search <pattern> --regex` | Python regex search instead of FTS |
-| `mergers search <query> --snippets` | Search with inline match excerpts (recommended for first-pass research) |
+| `mergers search <query> --no-snippets` | Suppress inline match excerpts |
 | `mergers show <id>` | Full detail on one merger |
 | `mergers show <id> --section reasons` | Only the ACCC's reasoning |
 | `mergers timeline <id>` | Chronological timeline (notification → determination) with durations |
+| `mergers related <id>` | Mergers linked via the `related merger` field |
 | `mergers party <name>` | All mergers involving a given acquirer or target |
 | `mergers party <name> --role acquirer` | Restrict to acquirer (or `target`) |
 | `mergers list` | Browse by filters |
+| `mergers list --sort duration` | Sort by review duration (also `date-asc`, `date-desc`, `name`) |
+| `mergers new` | Mergers added to the register in the last N days (default 7) |
+| `mergers new --by determined` | Filter on determination date instead of notification |
+| `mergers open <id>` | Open the merger in a browser at mergers.fyi |
+| `mergers open <id> --accc` | Open the original ACCC register page |
+| `mergers open <id> --print` | Print the URL instead of launching a browser |
 | `mergers questions` | List mergers with questionnaires |
 | `mergers questions <id>` | Questions for a specific merger |
-| `mergers questions --search "<text>"` | Search question text |
+| `mergers questions --search "<text>"` | Search question text across all mergers |
+| `mergers noccs` | List Notices of Competition Concerns (Phase 2) |
+| `mergers noccs <id>` | NOCC for a specific merger |
+| `mergers noccs --search "<text>"` | Search NOCC paragraph text |
 | `mergers industries` | Activity breakdown by ANZSIC industry |
 | `mergers industries --show <name>` | Mergers within an industry |
 | `mergers stats` | Aggregate statistics |
+| `mergers stats --by year` | Grouped counts (also `industry`, `acquirer`, `outcome`, `phase`) |
+| `mergers cache path` | Print the local cache directory |
+| `mergers cache clear` | Delete the local cache so the next command re-syncs |
 | `mergers --install-completion` | Install shell completion for the current shell |
 
 ### Filters shared by `search`, `list`, and `party`
@@ -87,15 +103,19 @@ need to parse results programmatically.
 | `--until` | Notified on or before this date (`YYYY-MM-DD`) |
 | `--limit` | Integer result cap (default 10 for search, 50 for list/party) |
 | `--has-related` / `--no-related` | Filter to mergers that do (or do not) have a linked related merger |
+| `--acquirer <name>` | Acquirer name contains this string (case-insensitive) |
+| `--target <name>` | Target name contains this string (case-insensitive) |
+
+`list` additionally accepts `--sort date-desc|date-asc|name|duration`
+(default `date-desc`).
 
 `search` additionally supports:
 - `--regex`: interprets the query as a Python regular expression
   (case-insensitive, dotall) and scans the indexed merger text directly.
   Useful when FTS tokenisation can't express the pattern (e.g.
   `--regex "acqui(re|sition)s?\s+of\s+shares"`).
-- `--snippets`: prints a short excerpt around each match inline. Recommended
-  as the default approach for first-pass research — avoids needing to open
-  each result individually.
+- `--snippets` / `--no-snippets`: inline match excerpts are printed by
+  default. Pass `--no-snippets` for a compact table.
 - `--section`: restricts the search to a specific content section —
   `all` (default), `reasons`, `overlap`, `description`, `parties`. Useful
   when you want to find mergers where a term appears in the ACCC's reasoning
@@ -142,48 +162,68 @@ linked matter.
 
 | User question | Command |
 |---|---|
-| Has the ACCC reviewed mergers in grocery retail before? | `mergers search "grocery retail" --snippets` |
-| What did the ACCC say about geographic markets in fuel? | `mergers search "geographic fuel" --snippets` then `mergers show <id> --section reasons` |
+| Has the ACCC reviewed mergers in grocery retail before? | `mergers search "grocery retail"` |
+| What did the ACCC say about geographic markets in fuel? | `mergers search "geographic fuel"` then `mergers show <id> --section reasons` |
 | Show me all Phase 2 cases. | `mergers list --phase 2 --json` |
 | Mergers notified in the first half of 2025? | `mergers list --since 2025-01-01 --until 2025-06-30 --json` |
 | Fuel-sector waivers in 2024? | `mergers list --industry fuel --waiver --year 2024 --json` |
+| What's been added to the register in the last week? | `mergers new --json` |
+| What's been determined in the last month? | `mergers new --by determined --days 30 --json` |
+| Longest-running reviews on the register. | `mergers list --sort duration --limit 20` |
 | How long did a specific merger take? | `mergers timeline MN-01016 --json` |
-| Has a particular company been acquiring other businesses? | `mergers party "Asahi" --json` |
-| Has the ACCC reviewed any deal where a given company was the target? | `mergers party "<name>" --role target --json` |
-| Find references to a very specific phrase FTS can't tokenise well. | `mergers search "<regex>" --regex --snippets` |
-| Find mergers where the ACCC's reasoning specifically discusses an issue. | `mergers search "<issue>" --section reasons --snippets` |
+| Has a particular company been acquiring other businesses? | `mergers list --acquirer "Asahi" --json` or `mergers party "Asahi" --json` |
+| Mergers where a given company was the target. | `mergers list --target "<name>" --json` or `mergers party "<name>" --role target --json` |
+| Find references to a very specific phrase FTS can't tokenise well. | `mergers search "<regex>" --regex` |
+| Find mergers where the ACCC's reasoning specifically discusses an issue. | `mergers search "<issue>" --section reasons` |
 | What questions did the ACCC ask in the Ampol merger? | `mergers questions MN-01019` |
 | Which mergers had questionnaires asking about geographic markets? | `mergers questions --search "geographic market" --json` |
+| Which NOCCs raise efficiency concerns? | `mergers noccs --search "efficiencies" --json` |
 | What industries see the most merger scrutiny? | `mergers industries --json` |
 | How long does a typical Phase 1 review take? | `mergers stats --json` |
+| Notifications and approvals by year. | `mergers stats --by year --json` |
+| Which acquirers appear most often? | `mergers stats --by acquirer --json` |
 | Pull up everything on a specific merger. | `mergers show MN-01016 --json` |
 | Just the reasoning on a specific merger. | `mergers show MN-01016 --section reasons` |
+| Give the user a link to share. | `mergers open MN-01016 --print` (or `--accc --print` for the ACCC page) |
 | Was this waiver refiled as a full notification? | `mergers show <waiver-id> --json` and check `related_merger` |
 | Find all mergers that were refiled from a waiver denial. | `mergers list --has-related --waiver --outcome denied --json` |
+| Export results to paste into a spreadsheet. | Add `--csv` to `search`, `list`, `party`, or `new` |
+| Export results as a Markdown table for a doc. | Add `--md` to the same commands |
 
 ## Workflow tips
 
 1. If `mergers sync` fails because you can't access `raw.githubusercontent.com`,
    try cloning the `nwbort/accc-mergers` repo, checking out the `cli-dist`
    branch, and using that directory as the `--source` for `mergers sync`.
-3. Start broad with `mergers search "<keywords>" --snippets` to get a short
-   list of candidate IDs with inline context — this replaces the need to open
-   each result individually.
-4. If the result count footer says results were truncated, re-run with
+2. Start broad with `mergers search "<keywords>"` — snippets are printed by
+   default, so a single call gives you candidate IDs with inline context.
+   Pass `--no-snippets` only when you specifically want a compact table.
+3. If the result count footer says results were truncated, re-run with
    `--limit <n>` to see the full set.
-5. For each candidate of interest, call `mergers show <id> --section reasons`
+4. For each candidate of interest, call `mergers show <id> --section reasons`
    to pull only the ACCC's reasoning. If no structured reasons exist the CLI
    falls back to the full determination text automatically.
-6. Use `--section reasons` on `search` to restrict matches to the ACCC's
+5. Use `--section reasons` on `search` to restrict matches to the ACCC's
    reasoning specifically, filtering out incidental mentions in party
-   descriptions: `mergers search "<issue>" --section reasons --snippets`.
-7. Combine with `mergers industries --show "<name>"` when you want every
+   descriptions: `mergers search "<issue>" --section reasons`.
+6. Combine with `mergers industries --show "<name>"` when you want every
    deal in a narrow sub-market.
-8. Use `mergers questions --search "<issue>"` to discover which past matters
+7. Use `mergers questions --search "<issue>"` to discover which past matters
    raised the same question the user is asking about.
-9. To follow a waiver→notification chain, check the `related_merger` field
+8. To follow a waiver→notification chain, check the `related_merger` field
    in `mergers show <id> --json`. Use `--has-related` to filter search or
    list results to only mergers with a linked matter.
+9. When the user wants a link to share or open in their browser, prefer
+   `mergers open <id> --print` (mergers.fyi page) — add `--accc` for the
+   original ACCC register URL.
+10. For "what's happened recently?" questions, `mergers new` is faster
+    than constructing date filters by hand. Pair with `--by determined`
+    when the user cares about decisions rather than new filings.
+11. For spreadsheet- or doc-ready output, add `--csv` or `--md` to
+    `search`, `list`, `party`, or `new` instead of munging `--json`.
+12. `mergers stats --by year|industry|acquirer|outcome|phase` answers
+    "how is activity distributed across X?" without needing to aggregate
+    `--json` output yourself.
 
 ## Limitations
 
