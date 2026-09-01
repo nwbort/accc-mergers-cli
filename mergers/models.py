@@ -125,6 +125,10 @@ class Merger:
     events: list[Event] = field(default_factory=list)
     comments: list[Comment] = field(default_factory=list)
     related_merger: RelatedMerger | None = None
+    under_appeal: bool = False
+    appeal: dict[str, Any] | None = None
+    judicial_review: dict[str, Any] | None = None
+    phase_1_estimate: dict[str, Any] | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -150,6 +154,18 @@ class Merger:
                 RelatedMerger.from_dict(data["related_merger"])
                 if isinstance(data.get("related_merger"), dict)
                 and (data["related_merger"].get("merger_id"))
+                else None
+            ),
+            under_appeal=bool(data.get("under_appeal")),
+            appeal=data.get("appeal") if isinstance(data.get("appeal"), dict) else None,
+            judicial_review=(
+                data.get("judicial_review")
+                if isinstance(data.get("judicial_review"), dict)
+                else None
+            ),
+            phase_1_estimate=(
+                data.get("phase_1_estimate")
+                if isinstance(data.get("phase_1_estimate"), dict)
                 else None
             ),
             raw=data,

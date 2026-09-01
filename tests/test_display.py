@@ -556,3 +556,63 @@ def test_cli_show_section_reasons_fallback(populated_db):
     output = _strip_ansi(result.stdout)
     # Should not be completely empty — either a fallback panel or an informative message
     assert "MN-01018" in output
+
+
+def test_cli_list_filters_under_appeal(populated_db):
+    result = runner.invoke(app, ["list", "--under-appeal", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert [r["merger_id"] for r in payload["results"]] == ["MN-01018"]
+
+
+def test_cli_list_filters_has_judicial_review(populated_db):
+    result = runner.invoke(app, ["list", "--has-judicial-review", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert [r["merger_id"] for r in payload["results"]] == ["MN-01019"]
+
+
+def test_cli_show_json_includes_appeal_and_judicial_review(populated_db):
+    result = runner.invoke(app, ["show", "MN-01018", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["under_appeal"] is True
+    assert payload["appeal"]["tribunal_number"] == "ACT 3 of 2025"
+
+    result = runner.invoke(app, ["show", "MN-01019", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["judicial_review"]["case_number"] == "NSD 1234/2024"
+
+
+def test_cli_show_appeal_section(populated_db):
+    result = runner.invoke(app, ["show", "MN-01018", "--section", "appeal"])
+    assert result.exit_code == 0, result.output
+    output = _strip_ansi(result.stdout)
+    assert "ACT 3 of 2025" in output
+    assert "TelstraX Pty Ltd" in output
+
+
+def test_cli_show_reports_phase_1_estimate(populated_db):
+    result = runner.invoke(app, ["show", "MN-01016"])
+    assert result.exit_code == 0, result.output
+    output = _strip_ansi(result.stdout)
+    assert "18 business days" in output
+
+
+def test_render_appeal_includes_documents(populated_db, capsys):
+    conn = db.connect()
+    try:
+        merger = db.get_merger(conn, "MN-01018")
+    finally:
+        conn.close()
+    display._render_appeal(merger)
+    output = _strip_ansi(capsys.readouterr().out)
+    assert "Application for review" in output
+
+
+def test_csv_export_includes_appeal_columns(populated_db):
+    result = runner.invoke(app, ["list", "--csv"])
+    assert result.exit_code == 0, result.output
+    assert "Under appeal" in result.stdout
+    assert "Judicial review" in result.stdout

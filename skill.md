@@ -110,6 +110,8 @@ or document).
 | `--has-related` / `--no-related` | Filter to mergers that do (or do not) have a linked related merger |
 | `--acquirer <name>` | Acquirer name contains this string (case-insensitive) |
 | `--target <name>` | Target name contains this string (case-insensitive) |
+| `--under-appeal` / `--no-under-appeal` | Filter to mergers currently under Australian Competition Tribunal appeal (or not) |
+| `--has-judicial-review` / `--no-judicial-review` | Filter to mergers that do (or do not) have a Federal Court judicial review filed |
 
 `list` additionally accepts `--sort date-desc|date-asc|name|duration`
 (default `date-desc`).
@@ -129,7 +131,8 @@ or document).
 ### `show` sections
 
 `--section` accepts one of: `all` (default), `determination`, `reasons`,
-`overlap`, `parties`, `description`, `industries`, `questionnaire`, `nocc`.
+`overlap`, `parties`, `description`, `industries`, `questionnaire`, `nocc`,
+`appeal` (Tribunal appeal and/or judicial review details, when present).
 Narrowing the section is the fastest way to pull up the ACCC's reasoning on
 a given case. If no structured reasons text exists, the CLI falls back to the
 full determination text and notes the fallback explicitly.
@@ -165,10 +168,11 @@ linked matter.
 
 ### Tribunal appeal and judicial review fields
 
-`mergers show <id> --json` can also carry two optional objects, present
-only for matters that have one (unlike `related_merger`, these are not
-surfaced as columns on `search`/`list`/`party` results — only `show`
-returns the full record):
+`--under-appeal`/`--no-under-appeal` and `--has-judicial-review`/
+`--no-judicial-review` work on `search`, `list`, and `party`, same as
+`--has-related`. `mergers show <id>` renders a dedicated panel when either
+is present (also reachable directly via `--section appeal`), and
+`mergers show <id> --json` carries the full objects:
 
 - `appeal` — Australian Competition Tribunal appeal details (tribunal
   number, tribunal URL, appeal type, appellant, lifecycle status, outcome,
@@ -177,10 +181,6 @@ returns the full record):
   but `under_appeal` is `false`.
 - `judicial_review` — a Federal Court judicial review record (applicant,
   filed date, case number, case URL), where one has been filed.
-
-There is no dedicated filter for these yet — check the field directly in
-`--json` output, or use `mergers search "<term>" --regex` against the raw
-text if the user is trying to find appealed or judicially-reviewed matters.
 
 ## Typical query patterns
 
@@ -211,9 +211,12 @@ text if the user is trying to find appealed or judicially-reviewed matters.
 | Give the user a link to share. | `mergers open MN-01016 --print` (or `--accc --print` for the ACCC page) |
 | Was this waiver refiled as a full notification? | `mergers show <waiver-id> --json` and check `related_merger` |
 | Find all mergers that were refiled from a waiver denial. | `mergers list --has-related --waiver --outcome denied --json` |
-| Was this merger appealed to the Tribunal, or is it still under appeal? | `mergers show <id> --json` and check `appeal` / `under_appeal` |
-| Has this merger been challenged by judicial review? | `mergers show <id> --json` and check `judicial_review` |
+| Was this merger appealed to the Tribunal, or is it still under appeal? | `mergers show <id> --section appeal` (or `--json` and check `appeal` / `under_appeal`) |
+| Which mergers are currently under Tribunal appeal? | `mergers list --under-appeal --json` |
+| Has this merger been challenged by judicial review? | `mergers show <id> --section appeal` (or `--json` and check `judicial_review`) |
+| Which mergers have had a judicial review filed? | `mergers list --has-judicial-review --json` |
 | Did the ACCC waive this notification? | `mergers show <id> --json` and check `phase` for `0` (waivers) |
+| How long is a specific merger's phase 1 review expected to take? | `mergers show <id> --json` and check `phase_1_estimate` (frozen at filing) |
 | Export results to paste into a spreadsheet. | Add `--csv` to `search`, `list`, `party`, or `new` |
 | Export results as a Markdown table for a doc. | Add `--md` to the same commands |
 

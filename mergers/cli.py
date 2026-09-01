@@ -195,6 +195,8 @@ def _parse_filters(
     section: str | None = None,
     acquirer: str | None = None,
     target: str | None = None,
+    under_appeal: bool | None = None,
+    has_judicial_review: bool | None = None,
 ) -> SearchFilters:
     if outcome is not None:
         allowed = {"approved", "denied", "phase2", "pending"}
@@ -223,6 +225,8 @@ def _parse_filters(
         has_related=has_related,
         acquirer=acquirer,
         target=target,
+        under_appeal=under_appeal,
+        has_judicial_review=has_judicial_review,
         limit=limit,
         section=section if section and section != "all" else None,
     )
@@ -278,6 +282,16 @@ def search(
         "--target",
         help="Restrict to mergers whose target name contains this string.",
     ),
+    under_appeal: Optional[bool] = typer.Option(
+        None,
+        "--under-appeal/--no-under-appeal",
+        help="Only include mergers that are (or are not) currently under Tribunal appeal.",
+    ),
+    has_judicial_review: Optional[bool] = typer.Option(
+        None,
+        "--has-judicial-review/--no-judicial-review",
+        help="Only include mergers that do (or do not) have a Federal Court judicial review.",
+    ),
     limit: int = typer.Option(10, "--limit", help="Max results."),
     snippets: bool = typer.Option(
         True,
@@ -317,6 +331,8 @@ def search(
         section=section,
         acquirer=acquirer,
         target=target,
+        under_appeal=under_appeal,
+        has_judicial_review=has_judicial_review,
     )
 
     conn = _with_connection()
@@ -391,7 +407,7 @@ def show(
         "--section",
         help=(
             "all | determination (full determination content) | reasons | overlap"
-            " | parties | industries | description | questionnaire | nocc"
+            " | parties | industries | description | questionnaire | nocc | appeal"
         ),
     ),
     json_output: bool = typer.Option(
@@ -411,6 +427,7 @@ def show(
         "description",
         "questionnaire",
         "nocc",
+        "appeal",
     }
     if section not in allowed:
         raise typer.BadParameter(f"--section must be one of {sorted(allowed)}")
@@ -575,6 +592,12 @@ def party(
     has_related: Optional[bool] = typer.Option(
         None, "--has-related/--no-related"
     ),
+    under_appeal: Optional[bool] = typer.Option(
+        None, "--under-appeal/--no-under-appeal"
+    ),
+    has_judicial_review: Optional[bool] = typer.Option(
+        None, "--has-judicial-review/--no-judicial-review"
+    ),
     limit: int = typer.Option(50, "--limit"),
     json_output: bool = typer.Option(False, "--json"),
     csv_output: bool = typer.Option(
@@ -600,6 +623,8 @@ def party(
         since=since,
         until=until,
         has_related=has_related,
+        under_appeal=under_appeal,
+        has_judicial_review=has_judicial_review,
     )
 
     role_norm = role.lower() if role else None
@@ -670,6 +695,16 @@ def list_cmd(
         "--target",
         help="Restrict to mergers whose target name contains this string.",
     ),
+    under_appeal: Optional[bool] = typer.Option(
+        None,
+        "--under-appeal/--no-under-appeal",
+        help="Only include mergers that are (or are not) currently under Tribunal appeal.",
+    ),
+    has_judicial_review: Optional[bool] = typer.Option(
+        None,
+        "--has-judicial-review/--no-judicial-review",
+        help="Only include mergers that do (or do not) have a Federal Court judicial review.",
+    ),
     limit: int = typer.Option(50, "--limit"),
     sort: str = typer.Option(
         "date-desc",
@@ -698,6 +733,8 @@ def list_cmd(
         has_related=has_related,
         acquirer=acquirer,
         target=target,
+        under_appeal=under_appeal,
+        has_judicial_review=has_judicial_review,
     )
 
     allowed_sort = {"date-asc", "date-desc", "name", "duration"}
