@@ -71,9 +71,9 @@ mergers sync --force
 | `mergers party <name>` | All mergers involving a given acquirer or target |
 | `mergers list` | Browse with filters, no query required |
 | `mergers browse` | Interactive TUI browser (requires the `[browse]` extra) |
-| `mergers new` | Mergers added to the register in the last N days (default 7) |
+| `mergers new` | Mergers added to the register in the last N days (`--days N` to override the default 7, `--by determined` to filter on determination date instead) |
 | `mergers open <id>` | Open a merger in the browser (mergers.fyi by default, `--accc` for the original page) |
-| `mergers questions [id]` | Browse questionnaire questions (`--search <q>` to grep across all) |
+| `mergers questions [id] [version]` | Browse questionnaire questions (`--search <q>` to grep across all, `<version>` or `--all` for matters with more than one questionnaire round — `1` is always the latest) |
 | `mergers noccs [id]` | Browse Notices of Competition Concerns issued in Phase 2 |
 | `mergers industries` | Breakdown of activity by ANZSIC industry |
 | `mergers stats` | Summary statistics (`--by year\|industry\|acquirer\|outcome\|phase` for grouped counts) |
@@ -92,7 +92,7 @@ or Markdown table — handy for pasting into spreadsheets or docs.
 |---|---|
 | `--outcome` | `approved`, `denied`, `phase2`, `pending` |
 | `--industry` | Partial ANZSIC name match (case-insensitive) |
-| `--phase` | `1` or `2` |
+| `--phase` | `0` (waivers), `1`, or `2` |
 | `--waiver` / `--no-waiver` | Waivers only / notifications only |
 | `--year` | Notification year, e.g. `2025` |
 | `--since` | Notified on or after this date (`YYYY-MM-DD`) |
@@ -116,6 +116,22 @@ restricts the search (and any `--regex` scan) to a single content section.
 to render only one block of a merger record instead of the full report.
 
 `party` accepts `--role acquirer|target` to restrict to one side of the deal.
+
+## Additional record fields
+
+`related_merger` is set on any result (from `search`, `list`, `party`, or
+`show`) when a linked matter exists — e.g. a waiver refiled as a
+notification. Use `--has-related`/`--no-related` to filter on it.
+
+`mergers show <id> --json` additionally returns the merger's full record,
+which can include two optional objects not exposed anywhere else:
+
+- `appeal` / `under_appeal` — Australian Competition Tribunal appeal details,
+  present only for matters that have been appealed. `under_appeal` is `true`
+  only while the appeal is still current.
+- `judicial_review` — Federal Court judicial review details (applicant,
+  filed date, case number, case URL), present only for matters that have
+  been judicially reviewed.
 
 ## Interactive browser
 

@@ -60,6 +60,7 @@ or document).
 | `mergers sync` | Refresh the local database from GitHub |
 | `mergers sync --force` | Force a full re-download |
 | `mergers sync --source <path>` | Sync from a local directory or URL instead of GitHub |
+| `mergers status` | Show the local cache's data version, generation time, and age |
 | `mergers search <query>` | Full-text search (prints snippets by default) |
 | `mergers search <pattern> --regex` | Python regex search instead of FTS |
 | `mergers search <query> --no-snippets` | Suppress inline match excerpts |
@@ -72,12 +73,15 @@ or document).
 | `mergers list` | Browse by filters |
 | `mergers list --sort duration` | Sort by review duration (also `date-asc`, `date-desc`, `name`) |
 | `mergers new` | Mergers added to the register in the last N days (default 7) |
+| `mergers new --days <n>` | Look back a custom number of days instead of the default 7 |
 | `mergers new --by determined` | Filter on determination date instead of notification |
 | `mergers open <id>` | Open the merger in a browser at mergers.fyi |
 | `mergers open <id> --accc` | Open the original ACCC register page |
 | `mergers open <id> --print` | Print the URL instead of launching a browser |
 | `mergers questions` | List mergers with questionnaires |
-| `mergers questions <id>` | Questions for a specific merger |
+| `mergers questions <id>` | Questions for a specific merger (latest questionnaire version) |
+| `mergers questions <id> <version>` | A specific questionnaire version (`1` = latest) when a matter had more than one round |
+| `mergers questions <id> --all` | Show every questionnaire version for a matter |
 | `mergers questions --search "<text>"` | Search question text across all mergers |
 | `mergers noccs` | List Notices of Competition Concerns (Phase 2) |
 | `mergers noccs <id>` | NOCC for a specific merger |
@@ -86,6 +90,7 @@ or document).
 | `mergers industries --show <name>` | Mergers within an industry |
 | `mergers stats` | Aggregate statistics |
 | `mergers stats --by year` | Grouped counts (also `industry`, `acquirer`, `outcome`, `phase`) |
+| `mergers browse` | Launch an interactive TUI browser (requires the CLI's optional `[browse]` extra) |
 | `mergers cache path` | Print the local cache directory |
 | `mergers cache clear` | Delete the local cache so the next command re-syncs |
 | `mergers --install-completion` | Install shell completion for the current shell |
@@ -96,7 +101,7 @@ or document).
 |---|---|
 | `--outcome` | `approved`, `denied`, `phase2`, `pending` |
 | `--industry` | Partial name match, case-insensitive |
-| `--phase` | `1` or `2` |
+| `--phase` | `0` (waivers), `1`, or `2` |
 | `--waiver` / `--no-waiver` | Filter to waivers or notifications only |
 | `--year` | Notification year (e.g. `2025`) |
 | `--since` | Notified on or after this date (`YYYY-MM-DD`) |
@@ -158,6 +163,25 @@ waiver), `refiled_as` (that waiver was refiled as this notification). Use
 `--has-related` in `search` or `list` to surface only mergers that have a
 linked matter.
 
+### Tribunal appeal and judicial review fields
+
+`mergers show <id> --json` can also carry two optional objects, present
+only for matters that have one (unlike `related_merger`, these are not
+surfaced as columns on `search`/`list`/`party` results — only `show`
+returns the full record):
+
+- `appeal` — Australian Competition Tribunal appeal details (tribunal
+  number, tribunal URL, appeal type, appellant, lifecycle status, outcome,
+  filed date, documents). `under_appeal` is `true` only while the appeal is
+  still current; a concluded or withdrawn appeal keeps the `appeal` record
+  but `under_appeal` is `false`.
+- `judicial_review` — a Federal Court judicial review record (applicant,
+  filed date, case number, case URL), where one has been filed.
+
+There is no dedicated filter for these yet — check the field directly in
+`--json` output, or use `mergers search "<term>" --regex` against the raw
+text if the user is trying to find appealed or judicially-reviewed matters.
+
 ## Typical query patterns
 
 | User question | Command |
@@ -187,6 +211,9 @@ linked matter.
 | Give the user a link to share. | `mergers open MN-01016 --print` (or `--accc --print` for the ACCC page) |
 | Was this waiver refiled as a full notification? | `mergers show <waiver-id> --json` and check `related_merger` |
 | Find all mergers that were refiled from a waiver denial. | `mergers list --has-related --waiver --outcome denied --json` |
+| Was this merger appealed to the Tribunal, or is it still under appeal? | `mergers show <id> --json` and check `appeal` / `under_appeal` |
+| Has this merger been challenged by judicial review? | `mergers show <id> --json` and check `judicial_review` |
+| Did the ACCC waive this notification? | `mergers show <id> --json` and check `phase` for `0` (waivers) |
 | Export results to paste into a spreadsheet. | Add `--csv` to `search`, `list`, `party`, or `new` |
 | Export results as a Markdown table for a doc. | Add `--md` to the same commands |
 
