@@ -314,6 +314,50 @@ def test_filter_no_related(populated_db):
     assert "MN-01016" in ids
 
 
+def test_filter_under_appeal(populated_db):
+    conn = db.connect()
+    try:
+        rows = db.list_mergers(conn, SearchFilters(under_appeal=True, limit=10))
+    finally:
+        conn.close()
+    assert _ids(rows) == ["MN-01018"]
+
+
+def test_filter_no_under_appeal(populated_db):
+    conn = db.connect()
+    try:
+        rows = db.list_mergers(conn, SearchFilters(under_appeal=False, limit=10))
+    finally:
+        conn.close()
+    ids = _ids(rows)
+    assert "MN-01018" not in ids
+    assert "MN-01016" in ids
+
+
+def test_filter_has_judicial_review(populated_db):
+    conn = db.connect()
+    try:
+        rows = db.list_mergers(
+            conn, SearchFilters(has_judicial_review=True, limit=10)
+        )
+    finally:
+        conn.close()
+    assert _ids(rows) == ["MN-01019"]
+
+
+def test_filter_no_judicial_review(populated_db):
+    conn = db.connect()
+    try:
+        rows = db.list_mergers(
+            conn, SearchFilters(has_judicial_review=False, limit=10)
+        )
+    finally:
+        conn.close()
+    ids = _ids(rows)
+    assert "MN-01019" not in ids
+    assert "MN-01016" in ids
+
+
 def test_search_questions_across_all_questionnaires(populated_db):
     conn = db.connect()
     try:

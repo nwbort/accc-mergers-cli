@@ -116,7 +116,11 @@ STALE_DAYS = 7
 # Bumped whenever the upstream-published SQLite schema changes in a way that
 # this CLI can no longer read. The sync flow refuses any manifest whose
 # ``schema_version`` doesn't match this constant.
-SCHEMA_VERSION = 1
+#
+# v2 added under_appeal, has_judicial_review and phase_1_estimate_days
+# columns to `mergers` (see SearchFilters.under_appeal/has_judicial_review
+# and Merger.phase_1_estimate).
+SCHEMA_VERSION = 2
 
 
 def ensure_cache_dir() -> None:
@@ -176,6 +180,8 @@ class SearchFilters:
     has_related: bool | None = None
     acquirer: str | None = None
     target: str | None = None
+    under_appeal: bool | None = None
+    has_judicial_review: bool | None = None
     limit: int = 10
     section: str | None = None  # restrict search to a content section
 
@@ -244,6 +250,14 @@ def _apply_filters(
     if filters.target:
         extra_where.append("LOWER(m.targets_text) LIKE ?")
         params.append(f"%{filters.target.lower()}%")
+    if filters.under_appeal is True:
+        extra_where.append("m.under_appeal = 1")
+    elif filters.under_appeal is False:
+        extra_where.append("m.under_appeal = 0")
+    if filters.has_judicial_review is True:
+        extra_where.append("m.has_judicial_review = 1")
+    elif filters.has_judicial_review is False:
+        extra_where.append("m.has_judicial_review = 0")
 
 
 def search(

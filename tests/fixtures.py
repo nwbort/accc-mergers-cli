@@ -69,6 +69,16 @@ MERGERS: list[dict[str, Any]] = [
             }
         ],
         "has_questionnaire": True,
+        "phase_1_estimate": {
+            "expected_business_days": 18,
+            "range_business_days": [15, 22],
+            "basis": "industry",
+            "anzsic_level": "class",
+            "anzsic_codes": ["1212"],
+            "sample_size": 12,
+            "estimated_at": "2025-08-15",
+            "method_version": 1,
+        },
     },
     {
         "merger_id": "MN-01017",
@@ -133,6 +143,23 @@ MERGERS: list[dict[str, Any]] = [
         "events": [],
         "comments": [],
         "has_questionnaire": False,
+        "under_appeal": True,
+        "appeal": {
+            "tribunal_number": "ACT 3 of 2025",
+            "tribunal_url": "https://example.com/act-3-2025",
+            "appeal_type": "Review",
+            "appellant": "TelstraX Pty Ltd",
+            "status": "current",
+            "outcome": None,
+            "filed_date": "2025-04-20T00:00:00+10:00",
+            "documents": [
+                {
+                    "title": "Application for review",
+                    "file_name": "app.pdf",
+                    "date": "2025-04-20",
+                }
+            ],
+        },
     },
     {
         "merger_id": "MN-01019",
@@ -176,6 +203,12 @@ MERGERS: list[dict[str, Any]] = [
         ],
         "comments": [],
         "has_questionnaire": False,
+        "judicial_review": {
+            "applicant": "Third Party Pty Ltd",
+            "filed_date": "2024-12-05T00:00:00+10:00",
+            "case_number": "NSD 1234/2024",
+            "case_url": "https://example.com/nsd-1234-2024",
+        },
     },
 ]
 

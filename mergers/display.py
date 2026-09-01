@@ -105,6 +105,8 @@ _EXPORT_COLUMNS: Sequence[tuple[str, str]] = (
     ("targets_text", "Targets"),
     ("notification_date", "Notified"),
     ("determination_date", "Determined"),
+    ("under_appeal", "Under appeal"),
+    ("has_judicial_review", "Judicial review"),
 )
 
 
@@ -114,7 +116,7 @@ def _export_cell(row: Any, key: str) -> str:
     value = row[key]
     if value is None:
         return ""
-    if key == "is_waiver":
+    if key in ("is_waiver", "under_appeal", "has_judicial_review"):
         return "yes" if value else "no"
     if key == "phase":
         return f"Phase {value}" if value else ""
@@ -231,6 +233,17 @@ def show_merger(
         header_lines.append(
             f"[magenta]{label}:[/] [bold cyan]{rel.merger_id}[/]{suffix}"
         )
+    if merger.appeal:
+        status = merger.appeal.get("status") or "—"
+        style = "red" if merger.under_appeal else "dim"
+        tag = "Under appeal" if merger.under_appeal else "Appeal"
+        header_lines.append(f"[{style}]{tag} ({status}):[/] {_appeal_summary(merger.appeal)}")
+    if merger.judicial_review:
+        header_lines.append(
+            f"[red]Judicial review filed:[/] {_judicial_review_summary(merger.judicial_review)}"
+        )
+    if merger.phase_1_estimate:
+        header_lines.append(f"[dim]{_phase_1_estimate_summary(merger.phase_1_estimate)}[/]")
     c.print(Panel("\n".join(header_lines), border_style="cyan"))
 
     if section in ("all", "parties"):
@@ -250,6 +263,9 @@ def show_merger(
 
     if section in ("all", "nocc") and nocc:
         _render_nocc(nocc)
+
+    if section in ("all", "appeal") and (merger.appeal or merger.judicial_review):
+        _render_appeal(merger)
 
     if section == "all":
         _render_comments(merger)
@@ -402,6 +418,90 @@ def _render_nocc(nocc: Nocc) -> None:
             border_style="red",
         )
     )
+
+
+def _appeal_summary(appeal: dict[str, Any]) -> str:
+    bits = [
+        b
+        for b in [
+            appeal.get("tribunal_number"),
+            appeal.get("appeal_type"),
+            appeal.get("appellant"),
+        ]
+        if b
+    ]
+    return " — ".join(bits) if bits else "(no tribunal number recorded)"
+
+
+def _judicial_review_summary(review: dict[str, Any]) -> str:
+    bits = [
+        b
+        for b in [review.get("case_number"), review.get("applicant")]
+        if b
+    ]
+    return " — ".join(bits) if bits else "(no case number recorded)"
+
+
+def _phase_1_estimate_summary(estimate: dict[str, Any]) -> str:
+    days = estimate.get("expected_business_days")
+    if days is None:
+        return "Estimated phase 1 duration: unavailable"
+    rng = estimate.get("range_business_days")
+    range_text = f" (typically {rng[0]}–{rng[1]} business days)" if isinstance(rng, list) and len(rng) == 2 else ""
+    basis = estimate.get("basis")
+    basis_text = f", based on {basis} history" if basis else ""
+    return f"Estimated phase 1 duration at filing: {days} business days{range_text}{basis_text}"
+
+
+def _render_appeal(merger: Merger) -> None:
+    c = console()
+    lines: list[str] = []
+
+    if merger.appeal:
+        a = merger.appeal
+        status = "Current" if merger.under_appeal else (a.get("status") or "Concluded")
+        rows = [
+            ("Tribunal number", a.get("tribunal_number")),
+            ("Type", a.get("appeal_type")),
+            ("Appellant", a.get("appellant")),
+            ("Status", status),
+            ("Outcome", a.get("outcome")),
+            ("Filed", format_date(a.get("filed_date"))),
+            ("Tribunal URL", a.get("tribunal_url")),
+        ]
+        lines.append("[bold underline]Australian Competition Tribunal appeal[/]")
+        for label, value in rows:
+            if value:
+                lines.append(f"[bold]{label}:[/] {value}")
+        documents = a.get("documents") or []
+        if documents:
+            lines.append("")
+            lines.append(f"[bold]Documents ({len(documents)}):[/]")
+            for doc in documents:
+                if not isinstance(doc, dict):
+                    continue
+                name = doc.get("title") or doc.get("file_name") or "(untitled)"
+                date = doc.get("date") or ""
+                suffix = f" — {date}" if date else ""
+                lines.append(f"  • {name}{suffix}")
+
+    if merger.judicial_review:
+        if lines:
+            lines.append("")
+        jr = merger.judicial_review
+        lines.append("[bold underline]Federal Court judicial review[/]")
+        for label, value in (
+            ("Applicant", jr.get("applicant")),
+            ("Filed", format_date(jr.get("filed_date"))),
+            ("Case number", jr.get("case_number")),
+            ("Case URL", jr.get("case_url")),
+        ):
+            if value:
+                lines.append(f"[bold]{label}:[/] {value}")
+
+    if not lines:
+        return
+    c.print(Panel("\n".join(lines), title="Appeal / judicial review", border_style="red"))
 
 
 def show_nocc_list(rows: Iterable[Any]) -> None:
