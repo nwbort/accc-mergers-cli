@@ -6,6 +6,24 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+STATUS_CEASED = "Assessment ceased"
+
+# Mirrors APPEAL_OUTCOME_BADGE_SUFFIX in the site's constants/appeal.js.
+APPEAL_OUTCOME_SUFFIX: dict[str, str] = {
+    "affirmed": "confirmed on appeal",
+    "dismissed": "confirmed on appeal",
+    "withdrawn": "appeal withdrawn",
+    "set_aside": "on appeal",
+    "varied": "varied on appeal",
+}
+
+
+def _dict_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [v for v in value if isinstance(v, dict)]
+
+
 @dataclass
 class Party:
     name: str
@@ -127,8 +145,20 @@ class Merger:
     related_merger: RelatedMerger | None = None
     under_appeal: bool = False
     appeal: dict[str, Any] | None = None
+    appeals: list[dict[str, Any]] = field(default_factory=list)
     judicial_review: dict[str, Any] | None = None
+    judicial_reviews: list[dict[str, Any]] = field(default_factory=list)
+    under_judicial_review: bool = False
     phase_1_estimate: dict[str, Any] | None = None
+    has_conditions: bool = False
+    public_benefit_in_progress: bool = False
+    public_benefits_determination: str | None = None
+    public_benefit_application_date: str | None = None
+    public_benefit_response_date: str | None = None
+    ceased_date: str | None = None
+    end_of_determination_period: str | None = None
+    pre_notification_summary: dict[str, Any] | None = None
+    foi_disclosures: list[dict[str, Any]] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -163,13 +193,49 @@ class Merger:
                 if isinstance(data.get("judicial_review"), dict)
                 else None
             ),
+            appeals=_dict_list(data.get("appeals")),
+            judicial_reviews=_dict_list(data.get("judicial_reviews")),
+            under_judicial_review=bool(data.get("under_judicial_review")),
             phase_1_estimate=(
                 data.get("phase_1_estimate")
                 if isinstance(data.get("phase_1_estimate"), dict)
                 else None
             ),
+            has_conditions=bool(data.get("has_conditions")),
+            public_benefit_in_progress=bool(data.get("public_benefit_in_progress")),
+            public_benefits_determination=data.get("public_benefits_determination"),
+            public_benefit_application_date=data.get("public_benefit_application_date"),
+            public_benefit_response_date=data.get("public_benefit_response_date"),
+            ceased_date=data.get("ceased_date"),
+            end_of_determination_period=data.get("end_of_determination_period"),
+            pre_notification_summary=(
+                data.get("pre_notification_summary")
+                if isinstance(data.get("pre_notification_summary"), dict)
+                else None
+            ),
+            foi_disclosures=_dict_list(data.get("foi_disclosures")),
             raw=data,
         )
+
+    def tribunal_appeals(self) -> list[dict[str, Any]]:
+        """One record per Tribunal matter.
+
+        ``appeals`` carries each matter with its documents; ``appeal`` is the
+        merger-level summary, and the only record on data from before
+        ``appeals`` existed.
+        """
+        if self.appeals:
+            return self.appeals
+        return [self.appeal] if self.appeal else []
+
+    def federal_court_reviews(self) -> list[dict[str, Any]]:
+        """One record per Federal Court file (``judicial_reviews``, else the summary)."""
+        if self.judicial_reviews:
+            return self.judicial_reviews
+        return [self.judicial_review] if self.judicial_review else []
+
+    def is_ceased(self) -> bool:
+        return (self.status or "") == STATUS_CEASED
 
     def determination_sections(self) -> list[DeterminationSection]:
         sections: list[DeterminationSection] = []
@@ -202,19 +268,59 @@ class Merger:
             return None
 
     def outcome(self) -> str | None:
-        """Return the effective outcome for display.
+        """Return the effective outcome, as mergers.fyi states it, or None while live.
 
-        When a merger is actively in Phase 2 (stage says "Phase 2"), the
-        Phase 1 determination of "Referred to Phase 2" is no longer meaningful
-        as an outcome — the merger is pending a Phase 2 result.
+        Mirrors the ``determination`` column upstream (build_cli_sqlite.py),
+        which mirrors the site's header:
+
+        * a matter whose public benefit application is running is live again,
+          even though its Phase 2 determination stands;
+        * a concluded Tribunal appeal's effective determination replaces the
+          ACCC's own;
+        * a ceased assessment reads as "Assessment ceased";
+        * "Approved" with conditions reads as "Approved with conditions";
+        * while a matter sits in Phase 2, its Phase 1 "Referred to phase 2" is
+          not an outcome.
         """
-        if self.accc_determination:
-            return self.accc_determination
-        if self.phase_2_determination:
-            return self.phase_2_determination
-        if "phase 2" in (self.stage or "").lower():
+        if self.public_benefit_in_progress:
             return None
-        return self.phase_1_determination or None
+        determination = self.accc_determination
+        appeal = self.appeal
+        if (
+            appeal
+            and appeal.get("status") == "concluded"
+            and appeal.get("effective_determination")
+        ):
+            determination = appeal["effective_determination"]
+        if not determination:
+            if self.is_ceased():
+                return STATUS_CEASED
+            if self.phase_2_determination:
+                determination = self.phase_2_determination
+            elif "phase 2" in (self.stage or "").lower():
+                return None
+            else:
+                determination = self.phase_1_determination
+        if determination == "Approved" and self.has_conditions:
+            return "Approved with conditions"
+        return determination or None
+
+    def appeal_suffix(self) -> str | None:
+        """How a concluded Tribunal appeal changed (or kept) the outcome."""
+        appeal = self.appeal
+        if not appeal or appeal.get("status") != "concluded":
+            return None
+        return APPEAL_OUTCOME_SUFFIX.get(appeal.get("outcome") or "")
+
+    def outcome_text(self) -> str:
+        """The outcome with its qualifiers, e.g. "Not approved · confirmed on appeal"."""
+        parts = [self.outcome() or (self.status or "Pending")]
+        if self.public_benefits_determination:
+            parts.append("after public benefit review")
+        suffix = self.appeal_suffix()
+        if suffix:
+            parts.append(suffix)
+        return " · ".join(parts)
 
     def phase_number(self) -> int | None:
         stage = (self.stage or "").lower()

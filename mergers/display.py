@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import io
+import re
 import sys
 from typing import Any, Iterable, Sequence
 
@@ -14,7 +15,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from .models import Merger, Nocc, Questionnaire
+from .models import Event, Merger, Nocc, Questionnaire
 
 _console: Console | None = None
 
@@ -26,8 +27,11 @@ def console() -> Console:
     return _console
 
 
+# First match wins, so "not approved" has to come before "approved".
 OUTCOME_STYLES = {
+    "not approved": "red",
     "approved": "green",
+    "ceased": "magenta",
     "denied": "red",
     "phase 2": "red",
     "phase2": "red",
@@ -107,6 +111,7 @@ _EXPORT_COLUMNS: Sequence[tuple[str, str]] = (
     ("determination_date", "Determined"),
     ("under_appeal", "Under appeal"),
     ("has_judicial_review", "Judicial review"),
+    ("under_judicial_review", "Under judicial review"),
 )
 
 
@@ -116,7 +121,7 @@ def _export_cell(row: Any, key: str) -> str:
     value = row[key]
     if value is None:
         return ""
-    if key in ("is_waiver", "under_appeal", "has_judicial_review"):
+    if key in ("is_waiver", "under_appeal", "has_judicial_review", "under_judicial_review"):
         return "yes" if value else "no"
     if key == "phase":
         return f"Phase {value}" if value else ""
@@ -213,11 +218,11 @@ def show_merger(
     header_lines = [
         f"[bold cyan]{merger.merger_id}[/] — [bold]{merger.merger_name}[/]",
     ]
-    determination = merger.outcome() or "Pending"
+    outcome = merger.outcome_text()
     header_lines.append(
         f"Status: {merger.status or '—'}   "
         f"Stage: {merger.stage or '—'}   "
-        f"Outcome: [{outcome_style(determination)}]{determination}[/]"
+        f"Outcome: [{outcome_style(merger.outcome())}]{outcome}[/]"
     )
     kind = "Waiver" if merger.is_waiver else "Notification"
     header_lines.append(
@@ -225,6 +230,10 @@ def show_merger(
         f"Notified: {format_date(merger.effective_notification_datetime)}   "
         f"Determined: {format_date(merger.determination_publication_date)}"
     )
+    if merger.is_ceased() and merger.ceased_date:
+        header_lines.append(
+            f"[magenta]Assessment ceased:[/] {_format_event_date(merger.ceased_date)}"
+        )
     if merger.related_merger:
         rel = merger.related_merger
         label = _relationship_label(rel.relationship)
@@ -233,17 +242,27 @@ def show_merger(
         header_lines.append(
             f"[magenta]{label}:[/] [bold cyan]{rel.merger_id}[/]{suffix}"
         )
-    if merger.appeal:
-        status = merger.appeal.get("status") or "—"
+    if merger.public_benefit_in_progress or merger.public_benefits_determination:
+        header_lines.append(_public_benefit_summary(merger))
+    appeals = merger.tribunal_appeals()
+    if appeals:
         style = "red" if merger.under_appeal else "dim"
         tag = "Under appeal" if merger.under_appeal else "Appeal"
-        header_lines.append(f"[{style}]{tag} ({status}):[/] {_appeal_summary(merger.appeal)}")
-    if merger.judicial_review:
+        summary = merger.appeal or appeals[0]
+        header_lines.append(f"[{style}]{tag}:[/] {_appeal_summary(summary)}")
+    reviews = merger.federal_court_reviews()
+    if reviews:
+        style = "red" if merger.under_judicial_review else "dim"
+        tag = "Under judicial review" if merger.under_judicial_review else "Judicial review"
         header_lines.append(
-            f"[red]Judicial review filed:[/] {_judicial_review_summary(merger.judicial_review)}"
+            f"[{style}]{tag}:[/] "
+            + "; ".join(_judicial_review_summary(r) for r in reviews)
         )
     if merger.phase_1_estimate:
         header_lines.append(f"[dim]{_phase_1_estimate_summary(merger.phase_1_estimate)}[/]")
+    pre = _pre_notification_text(merger.pre_notification_summary)
+    if pre:
+        header_lines.append(f"[dim]{pre}[/]")
     c.print(Panel("\n".join(header_lines), border_style="cyan"))
 
     if section in ("all", "parties"):
@@ -264,10 +283,13 @@ def show_merger(
     if section in ("all", "nocc") and nocc:
         _render_nocc(nocc)
 
-    if section in ("all", "appeal") and (merger.appeal or merger.judicial_review):
+    if section in ("all", "appeal") and (
+        merger.tribunal_appeals() or merger.federal_court_reviews()
+    ):
         _render_appeal(merger)
 
     if section == "all":
+        _render_foi(merger)
         _render_comments(merger)
 
 
@@ -420,17 +442,59 @@ def _render_nocc(nocc: Nocc) -> None:
     )
 
 
+# Mirror the site's constants/appeal.js and constants/judicialReview.js.
+APPEAL_TYPE_LABELS: dict[str, str] = {
+    "party_denial": "Appeal against refusal",
+    "party_conditional_clearance": "Appeal against conditional clearance",
+    "third_party_clearance": "Third party appeal against clearance",
+}
+
+APPEAL_OUTCOME_LABELS: dict[str, str] = {
+    "affirmed": "ACCC decision affirmed",
+    "set_aside": "ACCC decision set aside",
+    "varied": "ACCC decision varied",
+    "withdrawn": "Appeal withdrawn",
+    "dismissed": "Appeal dismissed",
+}
+
+JUDICIAL_REVIEW_OUTCOME_LABELS: dict[str, str] = {
+    "withdrawn": "Review discontinued",
+    "dismissed": "Application dismissed",
+    "set_aside": "ACCC decision set aside",
+}
+
+
+def _appeal_type_label(value: str | None) -> str | None:
+    if not value:
+        return None
+    return APPEAL_TYPE_LABELS.get(value, value.replace("_", " ").capitalize())
+
+
+def _appeal_state(appeal: dict[str, Any]) -> str:
+    if appeal.get("status") != "concluded":
+        return "Current"
+    return APPEAL_OUTCOME_LABELS.get(appeal.get("outcome") or "", "Concluded")
+
+
+def judicial_review_state(review: dict[str, Any]) -> str:
+    """How a Federal Court review stands: "Ongoing", or its outcome."""
+    if review.get("status") != "concluded":
+        return "Ongoing"
+    return JUDICIAL_REVIEW_OUTCOME_LABELS.get(review.get("outcome") or "", "Concluded")
+
+
 def _appeal_summary(appeal: dict[str, Any]) -> str:
     bits = [
         b
         for b in [
             appeal.get("tribunal_number"),
-            appeal.get("appeal_type"),
+            _appeal_type_label(appeal.get("appeal_type")),
             appeal.get("appellant"),
         ]
         if b
     ]
-    return " — ".join(bits) if bits else "(no tribunal number recorded)"
+    text = " — ".join(bits) if bits else "(no tribunal number recorded)"
+    return f"{text} ({_appeal_state(appeal).lower()})"
 
 
 def _judicial_review_summary(review: dict[str, Any]) -> str:
@@ -439,7 +503,49 @@ def _judicial_review_summary(review: dict[str, Any]) -> str:
         for b in [review.get("case_number"), review.get("applicant")]
         if b
     ]
-    return " — ".join(bits) if bits else "(no case number recorded)"
+    text = " — ".join(bits) if bits else "(no case number recorded)"
+    return f"{text} ({judicial_review_state(review).lower()})"
+
+
+def _public_benefit_summary(merger: Merger) -> str:
+    if merger.public_benefits_determination:
+        return (
+            f"[bold]Public benefit determination:[/] {merger.public_benefits_determination}"
+        )
+    bits = ["[yellow]Public benefit application under assessment[/]"]
+    if merger.phase_2_determination:
+        bits.append(f"Phase 2 determination: {merger.phase_2_determination}")
+    if merger.public_benefit_application_date:
+        bits.append(f"applied {_format_event_date(merger.public_benefit_application_date)}")
+    return " · ".join(bits)
+
+
+_PRE_NOTIFICATION_KIND_TEXT: dict[str, str] = {
+    "around": "began around",
+    "after": "began after",
+    "before": "began before",
+}
+
+
+def _pre_notification_text(summary: dict[str, Any] | None) -> str | None:
+    """One line for the condensed pre-notification estimate, as the site reads it.
+
+    ``kind`` says how to read ``start_date``: ``around`` (bracketed), ``after``
+    (only the earliest start is known), ``before`` (only the latest), or
+    ``none`` (no pre-notification period detectable).
+    """
+    if not summary:
+        return None
+    kind = summary.get("kind")
+    confidence = summary.get("confidence")
+    conf = f" ({confidence} confidence)" if confidence else ""
+    if kind == "none":
+        return f"Estimated pre-notification: none detected{conf}"
+    start = summary.get("start_date")
+    phrase = _PRE_NOTIFICATION_KIND_TEXT.get(kind or "")
+    if not start or not phrase:
+        return None
+    return f"Estimated pre-notification {phrase} {_format_event_date(start)}{conf}"
 
 
 def _phase_1_estimate_summary(estimate: dict[str, Any]) -> str:
@@ -457,43 +563,71 @@ def _render_appeal(merger: Merger) -> None:
     c = console()
     lines: list[str] = []
 
-    if merger.appeal:
-        a = merger.appeal
-        status = "Current" if merger.under_appeal else (a.get("status") or "Concluded")
+    for a in merger.tribunal_appeals():
+        if lines:
+            lines.append("")
+        lines.append("[bold underline]Australian Competition Tribunal appeal[/]")
+        hearing = a.get("hearing_date")
+        if hearing and a.get("hearing_end_date") and a["hearing_end_date"] != hearing:
+            hearing = (
+                f"{_format_event_date(hearing)} – {_format_event_date(a['hearing_end_date'])}"
+            )
+        elif hearing:
+            hearing = _format_event_date(hearing)
         rows = [
             ("Tribunal number", a.get("tribunal_number")),
-            ("Type", a.get("appeal_type")),
+            ("Type", _appeal_type_label(a.get("appeal_type"))),
             ("Appellant", a.get("appellant")),
-            ("Status", status),
-            ("Outcome", a.get("outcome")),
-            ("Filed", format_date(a.get("filed_date"))),
+            ("Status", _appeal_state(a)),
+            ("Effective determination", a.get("effective_determination")),
+            ("Filed", _format_event_date(a.get("filed_date")) if a.get("filed_date") else None),
+            ("Hearing", hearing),
+            (
+                "Concluded",
+                _format_event_date(a.get("concluded_date")) if a.get("concluded_date") else None,
+            ),
             ("Tribunal URL", a.get("tribunal_url")),
         ]
-        lines.append("[bold underline]Australian Competition Tribunal appeal[/]")
         for label, value in rows:
             if value:
                 lines.append(f"[bold]{label}:[/] {value}")
-        documents = a.get("documents") or []
+        documents = sorted(
+            (d for d in (a.get("documents") or []) if isinstance(d, dict)),
+            key=lambda d: str(d.get("date") or ""),
+            reverse=True,
+        )
         if documents:
             lines.append("")
             lines.append(f"[bold]Documents ({len(documents)}):[/]")
             for doc in documents:
-                if not isinstance(doc, dict):
-                    continue
-                name = doc.get("title") or doc.get("file_name") or "(untitled)"
-                date = doc.get("date") or ""
-                suffix = f" — {date}" if date else ""
-                lines.append(f"  • {name}{suffix}")
+                name = (
+                    doc.get("description")
+                    or doc.get("title")
+                    or doc.get("file_name")
+                    or "(untitled)"
+                )
+                by = doc.get("filed_by")
+                if by and by != "-":
+                    name = f"{name} ({by})"
+                date = _format_event_date(doc.get("date")) if doc.get("date") else ""
+                prefix = f"{date}  " if date else ""
+                lines.append(f"  • {prefix}{name}")
 
-    if merger.judicial_review:
+    for jr in merger.federal_court_reviews():
         if lines:
             lines.append("")
-        jr = merger.judicial_review
         lines.append("[bold underline]Federal Court judicial review[/]")
         for label, value in (
-            ("Applicant", jr.get("applicant")),
-            ("Filed", format_date(jr.get("filed_date"))),
             ("Case number", jr.get("case_number")),
+            ("Court", jr.get("court")),
+            ("Applicant", jr.get("applicant")),
+            ("Status", judicial_review_state(jr)),
+            ("Filed", _format_event_date(jr.get("filed_date")) if jr.get("filed_date") else None),
+            (
+                "Concluded",
+                _format_event_date(jr.get("concluded_date")) if jr.get("concluded_date") else None,
+            ),
+            ("Next hearing", _next_hearing_text(jr)),
             ("Case URL", jr.get("case_url")),
         ):
             if value:
@@ -502,6 +636,49 @@ def _render_appeal(merger: Merger) -> None:
     if not lines:
         return
     c.print(Panel("\n".join(lines), title="Appeal / judicial review", border_style="red"))
+
+
+def _next_hearing_text(review: dict[str, Any], today: dt.date | None = None) -> str | None:
+    """The review's next hearing someone attends (not chambers/administrative)."""
+    today = today or dt.date.today()
+    upcoming = []
+    for listing in review.get("listings") or []:
+        if not isinstance(listing, dict) or not listing.get("hearing"):
+            continue
+        try:
+            day = dt.date.fromisoformat(str(listing.get("date"))[:10])
+        except ValueError:
+            continue
+        if day >= today:
+            upcoming.append((day, listing))
+    if not upcoming:
+        return None
+    day, listing = min(upcoming, key=lambda x: x[0])
+    bits = [day.strftime("%d %b %Y")]
+    if listing.get("time"):
+        bits.append(str(listing["time"]))
+    if listing.get("reason"):
+        bits.append(f"— {listing['reason']}")
+    return " ".join(bits)
+
+
+def _render_foi(merger: Merger) -> None:
+    if not merger.foi_disclosures:
+        return
+    c = console()
+    lines = []
+    for f in merger.foi_disclosures:
+        bits = [f.get("reference") or "FOI release"]
+        if f.get("published_date"):
+            bits.append(_format_event_date(f["published_date"]))
+        if f.get("document_count"):
+            bits.append(f"{f['document_count']} documents")
+        lines.append("[bold]" + " · ".join(bits) + "[/]")
+        if f.get("description"):
+            lines.append(f["description"])
+        if f.get("url"):
+            lines.append(f"[dim]{f['url']}[/]")
+    c.print(Panel("\n".join(lines), title="FOI disclosures", border_style="blue"))
 
 
 def show_nocc_list(rows: Iterable[Any]) -> None:
@@ -632,53 +809,104 @@ def show_industry_table(rows: list[dict[str, Any]]) -> None:
     c.print(table)
 
 
+def _fmt_num(value: Any, places: int = 1) -> str:
+    if value is None:
+        return "—"
+    if isinstance(value, float):
+        return f"{value:.{places}f}"
+    return str(value)
+
+
+def _counts_table(title: str, counts: dict[str, Any]) -> Table:
+    table = Table(title=title, expand=True)
+    table.add_column("Value", overflow="fold")
+    table.add_column("Count", justify="right")
+    for key, value in sorted(counts.items(), key=lambda kv: -(kv[1] or 0)):
+        table.add_row(str(key), str(value))
+    return table
+
+
 def show_stats(stats: dict[str, Any]) -> None:
+    """Render the upstream stats.json (the numbers on mergers.fyi's dashboard)."""
     c = console()
     if not stats:
         c.print("[yellow]No stats available. Run `mergers sync` first.[/]")
         return
 
-    totals = stats.get("totals") or stats.get("summary") or {}
-    if totals:
-        table = Table(title="Totals", expand=True)
-        table.add_column("Metric", style="bold")
-        table.add_column("Value", justify="right")
-        for key, value in totals.items():
-            table.add_row(str(key), str(value))
-        c.print(table)
+    table = Table(title="Totals", expand=True)
+    table.add_column("Metric", style="bold")
+    table.add_column("Value", justify="right")
+    for key, label in (
+        ("total_mergers", "Notifications"),
+        ("total_waivers", "Waiver applications"),
+        ("total_conditional_approvals", "Approved with conditions"),
+    ):
+        if key in stats:
+            table.add_row(label, str(stats[key]))
+    clearance = stats.get("clearance_rate") or {}
+    if clearance:
+        table.add_row(
+            "Clearance rate",
+            f"{_fmt_num((clearance.get('rate') or 0) * 100)}% "
+            f"({clearance.get('cleared', '—')} of {clearance.get('total', '—')})",
+        )
+    c.print(table)
 
-    durations = stats.get("phase_durations") or stats.get("durations")
-    if durations:
-        table = Table(title="Phase duration (days)", expand=True)
-        table.add_column("Phase", style="bold")
-        table.add_column("Average", justify="right")
-        table.add_column("Median", justify="right")
-        if isinstance(durations, dict):
-            for phase, payload in durations.items():
-                if isinstance(payload, dict):
-                    table.add_row(
-                        str(phase),
-                        str(payload.get("average") or payload.get("avg") or "—"),
-                        str(payload.get("median") or "—"),
-                    )
-                else:
-                    table.add_row(str(phase), str(payload), "—")
+    durations = [
+        ("Phase 1 (notifications)", stats.get("phase_duration")),
+        ("Waivers", stats.get("waiver_duration")),
+    ]
+    if any(isinstance(d, dict) for _, d in durations):
+        table = Table(title="Time to determination", expand=True)
+        table.add_column("Matter", style="bold")
+        table.add_column("Median (business days)", justify="right")
+        table.add_column("Average (business days)", justify="right")
+        table.add_column("Median (calendar days)", justify="right")
+        table.add_column("Average (calendar days)", justify="right")
+        for label, d in durations:
+            if not isinstance(d, dict):
+                continue
+            table.add_row(
+                label,
+                _fmt_num(d.get("median_business_days")),
+                _fmt_num(d.get("average_business_days")),
+                _fmt_num(d.get("median_days")),
+                _fmt_num(d.get("average_days")),
+            )
         c.print(table)
+        percentiles = (stats.get("phase_duration") or {}).get("percentiles") or {}
+        if percentiles:
+            bits = []
+            for key, entry in percentiles.items():
+                if not isinstance(entry, dict):
+                    continue
+                day = key.replace("day", "")
+                bits.append(f"{_fmt_num(entry.get('percentage'))}% by business day {day}")
+            if bits:
+                c.print(f"[dim]Phase 1 determinations: {', '.join(bits)}.[/]")
 
-    top = stats.get("top_industries") or stats.get("industries")
-    if isinstance(top, list):
+    for key, title in (
+        ("by_status", "By status"),
+        ("by_determination", "Phase 1 determinations"),
+        ("by_phase_2_determination", "Phase 2 determinations"),
+        ("by_waiver_determination", "Waiver determinations"),
+    ):
+        counts = stats.get(key)
+        if isinstance(counts, dict) and counts:
+            c.print(_counts_table(title, counts))
+
+    top = stats.get("top_industries")
+    if isinstance(top, list) and top:
         table = Table(title="Top industries", expand=True)
         table.add_column("Industry", overflow="fold")
         table.add_column("Count", justify="right")
         for entry in top[:10]:
             if isinstance(entry, dict):
-                name = entry.get("name") or entry.get("industry") or "—"
-                count = entry.get("count") or entry.get("total") or "—"
-                table.add_row(str(name), str(count))
+                table.add_row(str(entry.get("name") or "—"), str(entry.get("count") or "—"))
         c.print(table)
 
-    recent = stats.get("recent_determinations") or stats.get("recent")
-    if isinstance(recent, list):
+    recent = stats.get("recent_determinations")
+    if isinstance(recent, list) and recent:
         table = Table(title="Recent determinations", expand=True)
         table.add_column("ID", style="bold cyan")
         table.add_column("Name", overflow="fold")
@@ -687,11 +915,14 @@ def show_stats(stats: dict[str, Any]) -> None:
         for entry in recent[:10]:
             if not isinstance(entry, dict):
                 continue
+            outcome = entry.get("determination") or "—"
+            if outcome == "Approved" and entry.get("has_conditions"):
+                outcome = "Approved with conditions"
             table.add_row(
                 str(entry.get("merger_id") or ""),
                 str(entry.get("merger_name") or ""),
-                str(entry.get("determination") or entry.get("outcome") or "—"),
-                format_date(entry.get("date") or entry.get("determination_date")),
+                Text(outcome, style=outcome_style(outcome)),
+                _format_event_date(entry.get("determination_date")),
             )
         c.print(table)
 
@@ -802,13 +1033,68 @@ def _humanize_event_label(
     return "Milestone"
 
 
+_EXTENSION_RE = re.compile(r"extended by (\d+)\s+business day", re.IGNORECASE)
+_EXTENSION_REASON_RE = re.compile(r"following\s+(.*)$", re.IGNORECASE)
+
+
+def _extension_label(title: str) -> tuple[str, str] | None:
+    """(label, reason) for a timeline-extension notice, else None.
+
+    Same reading as the upstream extensions output and the site's
+    timelineExtensions.js (pinned there by fixtures/extension-title-cases.json).
+    """
+    # Older "ACCC decided to extend the Phase 1 determination period" notices
+    # fall through to _TITLE_PATTERNS, which name the phase.
+    if "extended by" not in (title or "").lower():
+        return None
+    match = _EXTENSION_RE.search(title)
+    label = (
+        f"Timeline extended (+{match.group(1)} business day{'s' if match.group(1) != '1' else ''})"
+        if match
+        else "Timeline extended"
+    )
+    reason = _EXTENSION_REASON_RE.search(title)
+    detail = re.sub(r"\s+", " ", reason.group(1)).strip().rstrip(".") if reason else ""
+    return label, detail
+
+
+def _classify_event(event: Event) -> tuple[str, str]:
+    """(label, detail) for one register event, using the pipeline's own flags first."""
+    raw = event.raw
+    title = event.title or ""
+    base_title = raw.get("title") or title
+    if raw.get("is_appeal"):
+        # display_title already reads "Tribunal appeal – …" / "Federal Court – …".
+        detail_bits = [
+            b
+            for b in (
+                raw.get("court_outcome"),
+                raw.get("appeal_filed_by") if raw.get("appeal_filed_by") not in (None, "-") else None,
+                raw.get("tribunal_number") or raw.get("case_number"),
+            )
+            if b
+        ]
+        return (raw.get("appeal_base_title") or title or "Review event", " · ".join(detail_bits))
+    if raw.get("is_determination_event"):
+        return (title or "Determination issued", base_title if base_title != title else "")
+    if raw.get("is_questionnaire_event") or "questionnaire" in base_title.lower():
+        return ("Questionnaire published", base_title)
+    extension = _extension_label(base_title)
+    if extension:
+        return extension
+    label = _humanize_event_label(event.event_type, title)
+    detail = event.description or (title if label != title else "")
+    return label, detail or ""
+
+
 def timeline_events(merger: Merger) -> list[dict[str, Any]]:
     """Flatten a merger's timeline into sortable event records.
 
     Combines the notification date, determination publication date, and
     any events carried in ``merger.events``, de-duplicating entries that
-    share the same date and type. Returns records with ``date``, ``label``,
-    and optional ``description`` keys sorted chronologically.
+    share the same date and type. An FOI release's documents collapse into one
+    row per release date. Returns records with ``date``, ``label``, and
+    optional ``description`` keys sorted chronologically.
     """
     records: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
@@ -828,24 +1114,84 @@ def timeline_events(merger: Merger) -> list[dict[str, Any]]:
         "Waiver application lodged" if merger.is_waiver else "Notification lodged"
     )
     _add(merger.effective_notification_datetime, notification_label)
-    for event in merger.events:
-        label = _humanize_event_label(event.event_type, event.title)
-        detail = event.description or (event.title if label != event.title else None)
-        _add(event.event_date, label, detail)
-    _add(merger.determination_publication_date, "Determination published")
 
-    records.sort(key=lambda r: r["date"] or "")
+    foi_by_day: dict[str, list[Event]] = {}
+    determination_days: set[str] = set()
+    for event in merger.events:
+        if not event.event_date:
+            continue
+        if event.raw.get("is_foi"):
+            foi_by_day.setdefault(event.event_date[:10], []).append(event)
+            continue
+        if event.raw.get("is_determination_event"):
+            determination_days.add(event.event_date[:10])
+        label, detail = _classify_event(event)
+        _add(event.event_date, label, detail)
+
+    for day, events in foi_by_day.items():
+        refs = sorted({e.raw.get("foi_reference") for e in events if e.raw.get("foi_reference")})
+        n = len(events)
+        _add(
+            events[0].event_date,
+            f"FOI release ({n} document{'s' if n != 1 else ''})",
+            ", ".join(refs),
+        )
+
+    if merger.is_ceased() and merger.ceased_date and not any(
+        "ceased" in (e.title or "").lower()
+        for e in merger.events
+        if (e.event_date or "")[:10] == merger.ceased_date[:10]
+    ):
+        _add(merger.ceased_date, "Assessment ceased")
+    pub = merger.determination_publication_date
+    if pub and pub[:10] not in determination_days:
+        _add(pub, "Determination published")
+
+    records.sort(key=lambda r: (r["date"] or "")[:10])
     return records
+
+
+def upcoming_dates(merger: Merger, today: dt.date | None = None) -> list[dict[str, Any]]:
+    """Dated milestones still to come: statutory deadline, public benefit dates, hearings."""
+    today = today or dt.date.today()
+    out: list[dict[str, Any]] = []
+
+    def _add(date: str | None, label: str) -> None:
+        parsed = _parse_iso(date) if date else None
+        if parsed is None:
+            try:
+                parsed_day = dt.date.fromisoformat(str(date)[:10]) if date else None
+            except ValueError:
+                parsed_day = None
+        else:
+            parsed_day = parsed.date()
+        if parsed_day and parsed_day >= today:
+            out.append({"date": str(date), "label": label})
+
+    live = merger.outcome() is None and not merger.is_ceased()
+    if live:
+        _add(merger.public_benefit_response_date, "Public benefit responses / remedy offer due")
+        _add(merger.end_of_determination_period, "Determination due (statutory deadline)")
+    for a in merger.tribunal_appeals():
+        if a.get("status") != "concluded" and a.get("hearing_date"):
+            _add(a["hearing_date"], f"Tribunal hearing ({a.get('tribunal_number') or 'appeal'})")
+    for jr in merger.federal_court_reviews():
+        if jr.get("status") == "concluded":
+            continue
+        for listing in jr.get("listings") or []:
+            if isinstance(listing, dict) and listing.get("hearing") and listing.get("date"):
+                reason = listing.get("reason") or "hearing"
+                _add(listing["date"], f"Federal Court {reason.lower()} ({jr.get('case_number') or 'review'})")
+    out.sort(key=lambda r: r["date"][:10])
+    return out
 
 
 def show_timeline(merger: Merger, show_detail: bool = False) -> None:
     c = console()
-    determination = merger.outcome() or "Pending"
-
     header = (
         f"[bold cyan]{merger.merger_id}[/] — [bold]{merger.merger_name}[/]\n"
         f"Stage: {merger.stage or '—'}   "
-        f"Outcome: [{outcome_style(determination)}]{determination}[/]"
+        f"Outcome: [{outcome_style(merger.outcome())}]{merger.outcome_text()}[/]"
     )
     c.print(Panel(header, border_style="cyan"))
 
@@ -875,15 +1221,22 @@ def show_timeline(merger: Merger, show_detail: bool = False) -> None:
         table.add_row(*row)
     c.print(table)
 
-    total_days = _days_between(
-        merger.effective_notification_datetime,
-        merger.determination_publication_date,
-    )
+    end = merger.determination_publication_date
+    end_label = "determination"
+    if merger.is_ceased() and merger.ceased_date:
+        end, end_label = merger.ceased_date, "assessment ceased"
+    total_days = _days_between(merger.effective_notification_datetime, end)
     if total_days is not None:
         c.print(
-            f"[dim]Total duration:[/] notification → determination = "
+            f"[dim]Total duration:[/] notification → {end_label} = "
             f"{total_days} days"
         )
+
+    upcoming = upcoming_dates(merger)
+    if upcoming:
+        c.print("[bold]Upcoming:[/]")
+        for item in upcoming:
+            c.print(f"  {_format_event_date(item['date'])}  {item['label']}")
 
 
 def warn_stale_cache(age_days: float) -> None:

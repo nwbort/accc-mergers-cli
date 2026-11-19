@@ -197,9 +197,10 @@ def _parse_filters(
     target: str | None = None,
     under_appeal: bool | None = None,
     has_judicial_review: bool | None = None,
+    under_judicial_review: bool | None = None,
 ) -> SearchFilters:
     if outcome is not None:
-        allowed = {"approved", "denied", "phase2", "pending"}
+        allowed = set(db.OUTCOMES)
         if outcome.lower() not in allowed:
             raise typer.BadParameter(
                 f"--outcome must be one of {sorted(allowed)}"
@@ -227,6 +228,7 @@ def _parse_filters(
         target=target,
         under_appeal=under_appeal,
         has_judicial_review=has_judicial_review,
+        under_judicial_review=under_judicial_review,
         limit=limit,
         section=section if section and section != "all" else None,
     )
@@ -236,7 +238,7 @@ def _parse_filters(
 def search(
     query: str = typer.Argument(..., help="Full-text search query, or regex if --regex is set."),
     outcome: Optional[str] = typer.Option(
-        None, "--outcome", help="approved | denied | phase2 | pending"
+        None, "--outcome", help="approved | conditional | denied | ceased | phase2 | pending"
     ),
     industry: Optional[str] = typer.Option(
         None, "--industry", help="Partial industry name match."
@@ -290,7 +292,12 @@ def search(
     has_judicial_review: Optional[bool] = typer.Option(
         None,
         "--has-judicial-review/--no-judicial-review",
-        help="Only include mergers that do (or do not) have a Federal Court judicial review.",
+        help="Only include mergers that do (or do not) have a Federal Court judicial review (live or concluded).",
+    ),
+    under_judicial_review: Optional[bool] = typer.Option(
+        None,
+        "--under-judicial-review/--not-under-judicial-review",
+        help="Only include mergers whose Federal Court review is (or is not) still live.",
     ),
     limit: int = typer.Option(10, "--limit", help="Max results."),
     snippets: bool = typer.Option(
@@ -333,6 +340,7 @@ def search(
         target=target,
         under_appeal=under_appeal,
         has_judicial_review=has_judicial_review,
+        under_judicial_review=under_judicial_review,
     )
 
     conn = _with_connection()
@@ -496,9 +504,12 @@ def timeline(
                 "merger_name": merger.merger_name,
                 "stage": merger.stage,
                 "outcome": merger.outcome(),
+                "outcome_text": merger.outcome_text(),
                 "notification_date": merger.effective_notification_datetime,
                 "determination_date": merger.determination_publication_date,
+                "ceased_date": merger.ceased_date,
                 "events": events,
+                "upcoming": display.upcoming_dates(merger),
             }
         )
         return
@@ -582,7 +593,9 @@ def party(
         "--role",
         help="Restrict to 'acquirer' or 'target'; default searches both.",
     ),
-    outcome: Optional[str] = typer.Option(None, "--outcome"),
+    outcome: Optional[str] = typer.Option(
+        None, "--outcome", help="approved | conditional | denied | ceased | phase2 | pending"
+    ),
     industry: Optional[str] = typer.Option(None, "--industry"),
     phase: Optional[int] = typer.Option(None, "--phase"),
     waiver: Optional[bool] = typer.Option(None, "--waiver/--no-waiver"),
@@ -597,6 +610,9 @@ def party(
     ),
     has_judicial_review: Optional[bool] = typer.Option(
         None, "--has-judicial-review/--no-judicial-review"
+    ),
+    under_judicial_review: Optional[bool] = typer.Option(
+        None, "--under-judicial-review/--not-under-judicial-review"
     ),
     limit: int = typer.Option(50, "--limit"),
     json_output: bool = typer.Option(False, "--json"),
@@ -625,6 +641,7 @@ def party(
         has_related=has_related,
         under_appeal=under_appeal,
         has_judicial_review=has_judicial_review,
+        under_judicial_review=under_judicial_review,
     )
 
     role_norm = role.lower() if role else None
@@ -667,7 +684,9 @@ def party(
 
 @app.command(name="list")
 def list_cmd(
-    outcome: Optional[str] = typer.Option(None, "--outcome"),
+    outcome: Optional[str] = typer.Option(
+        None, "--outcome", help="approved | conditional | denied | ceased | phase2 | pending"
+    ),
     industry: Optional[str] = typer.Option(None, "--industry"),
     phase: Optional[int] = typer.Option(
         None, "--phase", help="0 (waivers), 1, or 2"
@@ -703,7 +722,12 @@ def list_cmd(
     has_judicial_review: Optional[bool] = typer.Option(
         None,
         "--has-judicial-review/--no-judicial-review",
-        help="Only include mergers that do (or do not) have a Federal Court judicial review.",
+        help="Only include mergers that do (or do not) have a Federal Court judicial review (live or concluded).",
+    ),
+    under_judicial_review: Optional[bool] = typer.Option(
+        None,
+        "--under-judicial-review/--not-under-judicial-review",
+        help="Only include mergers whose Federal Court review is (or is not) still live.",
     ),
     limit: int = typer.Option(50, "--limit"),
     sort: str = typer.Option(
@@ -735,6 +759,7 @@ def list_cmd(
         target=target,
         under_appeal=under_appeal,
         has_judicial_review=has_judicial_review,
+        under_judicial_review=under_judicial_review,
     )
 
     allowed_sort = {"date-asc", "date-desc", "name", "duration"}
@@ -1124,7 +1149,9 @@ def new_cmd(
         "--by",
         help="Which date to filter on: notified | determined.",
     ),
-    outcome: Optional[str] = typer.Option(None, "--outcome"),
+    outcome: Optional[str] = typer.Option(
+        None, "--outcome", help="approved | conditional | denied | ceased | phase2 | pending"
+    ),
     industry: Optional[str] = typer.Option(None, "--industry"),
     phase: Optional[int] = typer.Option(None, "--phase"),
     waiver: Optional[bool] = typer.Option(None, "--waiver/--no-waiver"),

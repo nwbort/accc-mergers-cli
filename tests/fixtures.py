@@ -364,28 +364,50 @@ NOCCS: dict[str, dict[str, Any]] = {
 }
 
 
+# Same shape as the upstream frontend/public/data/stats.json.
 STATS: dict[str, Any] = {
-    "totals": {
-        "total_mergers": 3,
-        "approved": 2,
-        "phase_2": 1,
+    "total_mergers": 3,
+    "total_waivers": 0,
+    "total_conditional_approvals": 0,
+    "by_status": {"Assessment completed": 2, "Under assessment": 1},
+    "by_determination": {"Approved": 1, "Referred to phase 2": 1},
+    "by_phase_2_determination": {"Not approved": 1},
+    "by_waiver_determination": {},
+    "clearance_rate": {"cleared": 1, "not_cleared": 1, "total": 2, "rate": 0.5},
+    "phase_duration": {
+        "average_days": 30.0,
+        "median_days": 28,
+        "average_business_days": 20.5,
+        "median_business_days": 19,
+        "percentiles": {
+            "day15": {"count": 0, "percentage": 0.0},
+            "day20": {"count": 1, "percentage": 100.0},
+            "day30": {"count": 1, "percentage": 100.0},
+        },
     },
-    "phase_durations": {
-        "phase_1": {"average": 30, "median": 28},
+    "waiver_duration": {
+        "average_days": 21.0,
+        "median_days": 21,
+        "average_business_days": 14.5,
+        "median_business_days": 15,
     },
     "top_industries": [
         {"name": "Beverage Manufacturing", "count": 1},
         {"name": "Fuel Retailing", "count": 1},
     ],
+    "recent_mergers": [],
     "recent_determinations": [
         {
             "merger_id": "MN-01016",
             "merger_name": "Asahi – Warehouse site",
             "determination": "Approved",
-            "date": "2025-09-12",
+            "determination_date": "2025-09-12T12:00:00Z",
+            "is_waiver": False,
+            "has_conditions": False,
         }
     ],
 }
+
 
 INDUSTRIES: list[dict[str, Any]] = [
     {"code": "1212", "name": "Beverage Manufacturing"},

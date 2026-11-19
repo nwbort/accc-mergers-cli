@@ -76,7 +76,7 @@ mergers sync --force
 | `mergers questions [id] [version]` | Browse questionnaire questions (`--search <q>` to grep across all, `<version>` or `--all` for matters with more than one questionnaire round — `1` is always the latest) |
 | `mergers noccs [id]` | Browse Notices of Competition Concerns issued in Phase 2 |
 | `mergers industries` | Breakdown of activity by ANZSIC industry |
-| `mergers stats` | Summary statistics (`--by year\|industry\|acquirer\|outcome\|phase` for grouped counts) |
+| `mergers stats` | Headline numbers from mergers.fyi — totals, clearance rate, time to determination, determinations by phase (`--by year\|industry\|acquirer\|outcome\|phase` for grouped counts) |
 | `mergers cache path` | Print the local cache directory |
 | `mergers cache clear` | Delete the local cache so the next command re-syncs |
 
@@ -92,7 +92,7 @@ set too (it already scopes by party name, so it has no `--acquirer`/
 
 | Flag | Description |
 |---|---|
-| `--outcome` | `approved`, `denied`, `phase2`, `pending` |
+| `--outcome` | `approved` (incl. conditional), `conditional`, `denied`, `ceased`, `phase2`, `pending` (still live — including a matter back under assessment in the public benefit phase) |
 | `--industry` | Partial ANZSIC name match (case-insensitive) |
 | `--phase` | `0` (waivers), `1`, or `2` |
 | `--waiver` / `--no-waiver` | Waivers only / notifications only |
@@ -103,7 +103,8 @@ set too (it already scopes by party name, so it has no `--acquirer`/
 | `--acquirer <name>` | Acquirer name contains this string (case-insensitive) |
 | `--target <name>` | Target name contains this string (case-insensitive) |
 | `--under-appeal` / `--no-under-appeal` | Only mergers currently under Australian Competition Tribunal appeal (or not) |
-| `--has-judicial-review` / `--no-judicial-review` | Only mergers that do (or do not) have a Federal Court judicial review filed |
+| `--has-judicial-review` / `--no-judicial-review` | Only mergers that do (or do not) have a Federal Court judicial review filed (live or concluded) |
+| `--under-judicial-review` / `--not-under-judicial-review` | Only mergers whose Federal Court review is (or is not) still live |
 | `--limit N` | Max results |
 
 `list` additionally accepts `--sort date-desc|date-asc|name|duration`
@@ -135,15 +136,39 @@ directly:
   appeal is current. Filter with `--under-appeal`/`--no-under-appeal`.
 - `has_judicial_review` — whether a Federal Court judicial review has been
   filed. Filter with `--has-judicial-review`/`--no-judicial-review`.
+- `under_judicial_review` — `true` only while a Federal Court review is live.
+  Filter with `--under-judicial-review`/`--not-under-judicial-review`.
+- `has_conditions` — the clearance came with conditions (the outcome then
+  reads "Approved with conditions").
+
+The **Outcome** column reads the way mergers.fyi states it: "Approved with
+conditions" for a conditional clearance, "Assessment ceased" when the ACCC
+stopped assessing a matter, a concluded Tribunal appeal's effective
+determination in place of the ACCC's, and pending while a matter is live —
+including a Phase 2 refusal whose public benefit application is still being
+assessed.
 
 `mergers show <id>` (and `mergers show <id> --json`) goes further and
 returns the full nested records instead of just the flat flags:
-`related_merger`, `appeal` (with `under_appeal` alongside it), and
-`judicial_review`. `show` also renders a dedicated panel for the appeal/
-judicial review details, reachable directly via `--section appeal`.
-`phase_1_estimate` — the phase-1 review duration predicted at filing time,
-frozen against later drift — is in `show --json` for notification matters
-too, though it isn't filterable yet.
+`related_merger`; `appeals` (one record per Tribunal matter, with its filed
+documents) and the merger-level `appeal` summary, with `under_appeal`
+alongside; `judicial_reviews` (one per Federal Court file: court, status,
+outcome, listings) and the `judicial_review` summary; the public benefit
+phase (`public_benefit_in_progress`, `public_benefit_application_date`,
+`public_benefit_response_date`, `public_benefits_determination`);
+`ceased_date`; and `foi_disclosures`. `show` renders a dedicated panel for
+the appeals and judicial reviews (`--section appeal`) and one for FOI
+releases. Its header also gives `phase_1_estimate` — the phase-1 review
+duration predicted at filing time, frozen against later drift — and the
+estimated start of pre-notification contact with the ACCC
+(`pre_notification_summary`, the same reading mergers.fyi and its API show).
+
+`mergers timeline <id>` reads the register's own event flags: determinations
+carry their phase and outcome, Tribunal and Federal Court filings are
+labelled as such, an FOI release collapses to one row, and timeline
+extensions show their length and reason. Below the table it lists what is
+still to come (statutory deadline, public benefit response date, Tribunal and
+court hearings); `--json` returns those as `upcoming`.
 
 ## Interactive browser
 
