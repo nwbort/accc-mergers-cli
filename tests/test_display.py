@@ -169,7 +169,7 @@ def test_cli_stats(populated_db):
     result = runner.invoke(app, ["stats", "--json"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    assert payload["totals"]["total_mergers"] == 3
+    assert payload["total_mergers"] == 3
 
 
 def test_cli_status_reports_version_and_counts(populated_db):

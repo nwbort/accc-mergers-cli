@@ -39,6 +39,8 @@ CREATE TABLE mergers (
     related_merger_name TEXT,
     under_appeal INTEGER,
     has_judicial_review INTEGER,
+    under_judicial_review INTEGER,
+    has_conditions INTEGER,
     phase_1_estimate_days INTEGER,
     raw_json TEXT
 );
@@ -180,9 +182,9 @@ def _insert_merger(conn: sqlite3.Connection, merger: Merger) -> None:
             acquirers_text, targets_text, industries_text,
             determination, phase, notification_date, determination_date,
             related_merger_id, related_relationship, related_merger_name,
-            under_appeal, has_judicial_review, phase_1_estimate_days,
-            raw_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            under_appeal, has_judicial_review, under_judicial_review,
+            has_conditions, phase_1_estimate_days, raw_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             merger.merger_id,
@@ -201,7 +203,9 @@ def _insert_merger(conn: sqlite3.Connection, merger: Merger) -> None:
             related.relationship if related else None,
             related.merger_name if related else None,
             1 if merger.under_appeal else 0,
-            1 if merger.judicial_review else 0,
+            1 if merger.federal_court_reviews() else 0,
+            1 if merger.under_judicial_review else 0,
+            1 if merger.has_conditions else 0,
             phase_1_estimate.get("expected_business_days"),
             json.dumps(merger.raw),
         ),

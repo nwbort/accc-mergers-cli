@@ -95,7 +95,7 @@ def build_filters(kwargs: dict[str, str], limit: int = _LIST_LIMIT) -> SearchFil
     outcome = kwargs.get("outcome")
     if outcome:
         outcome = outcome.lower()
-        if outcome not in {"approved", "denied", "phase2", "pending"}:
+        if outcome not in db.OUTCOMES:
             outcome = None
 
     phase: int | None = None
@@ -243,7 +243,8 @@ HELP_TEXT = """\
 
 [bold]Filter syntax[/] (type into the filter input)
   free text             Full-text search across descriptions and reasons
-  outcome:approved      Filter by outcome (approved|denied|phase2|pending)
+  outcome:approved      Filter by outcome
+                        (approved|conditional|denied|ceased|phase2|pending)
   industry:beverage     Partial ANZSIC industry match
   acquirer:asahi        Acquirer name contains
   target:warehouse      Target name contains

@@ -24,7 +24,7 @@ def test_sync_installs_database_from_upstream(populated_db):
         assert q.file_name == "Questionnaire - Asahi - Warehouse site.pdf"
         assert q.all_questionnaires == []
         stats = db.get_stats(conn)
-        assert stats["totals"]["total_mergers"] == 3
+        assert stats["total_mergers"] == 3
     finally:
         conn.close()
 

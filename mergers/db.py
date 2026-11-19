@@ -120,7 +120,15 @@ STALE_DAYS = 7
 # v2 added under_appeal, has_judicial_review and phase_1_estimate_days
 # columns to `mergers` (see SearchFilters.under_appeal/has_judicial_review
 # and Merger.phase_1_estimate).
-SCHEMA_VERSION = 2
+#
+# v3 made ``determination`` read as mergers.fyi states the outcome
+# ("Approved with conditions", "Assessment ceased", a concluded appeal's
+# effective determination, and NULL while a public benefit application runs)
+# and added under_judicial_review and has_conditions columns.
+SCHEMA_VERSION = 3
+
+# Accepted --outcome values.
+OUTCOMES = ("approved", "conditional", "denied", "ceased", "phase2", "pending")
 
 
 def ensure_cache_dir() -> None:
@@ -182,6 +190,7 @@ class SearchFilters:
     target: str | None = None
     under_appeal: bool | None = None
     has_judicial_review: bool | None = None
+    under_judicial_review: bool | None = None
     limit: int = 10
     section: str | None = None  # restrict search to a content section
 
@@ -189,9 +198,15 @@ class SearchFilters:
 def _outcome_where(outcome: str) -> tuple[str, list[Any]]:
     outcome = outcome.lower()
     if outcome == "approved":
-        return "LOWER(m.determination) = ?", ["approved"]
+        # Conditional clearances are approvals too; --outcome conditional
+        # narrows to just those.
+        return "LOWER(m.determination) IN (?, ?)", ["approved", "approved with conditions"]
+    if outcome == "conditional":
+        return "LOWER(m.determination) = ?", ["approved with conditions"]
     if outcome == "denied":
         return "(LOWER(m.determination) = ? OR LOWER(m.determination) = ?)", ["denied", "not approved"]
+    if outcome == "ceased":
+        return "LOWER(m.determination) = ?", ["assessment ceased"]
     if outcome == "phase2":
         return "m.phase = ?", [2]
     if outcome == "pending":
@@ -200,6 +215,14 @@ def _outcome_where(outcome: str) -> tuple[str, list[Any]]:
             ["%pending%"],
         )
     raise ValueError(f"Unknown outcome: {outcome}")
+
+
+def is_approved(determination: str | None) -> bool:
+    return (determination or "").lower() in ("approved", "approved with conditions")
+
+
+def is_denied(determination: str | None) -> bool:
+    return (determination or "").lower() in ("denied", "not approved")
 
 
 def _apply_filters(
@@ -258,6 +281,10 @@ def _apply_filters(
         extra_where.append("m.has_judicial_review = 1")
     elif filters.has_judicial_review is False:
         extra_where.append("m.has_judicial_review = 0")
+    if filters.under_judicial_review is True:
+        extra_where.append("m.under_judicial_review = 1")
+    elif filters.under_judicial_review is False:
+        extra_where.append("m.under_judicial_review = 0")
 
 
 def search(
@@ -506,7 +533,7 @@ def industry_breakdown(conn: sqlite3.Connection) -> list[dict[str, Any]]:
                 entry["waivers"] += 1
             else:
                 entry["notifications"] += 1
-            if (row["determination"] or "").lower() == "approved":
+            if is_approved(row["determination"]):
                 entry["approved"] += 1
             if row["phase"] == 2:
                 entry["phase2"] += 1
@@ -574,10 +601,9 @@ def stats_by_axis(
             entry["waivers"] += 1
         else:
             entry["notifications"] += 1
-        outcome = (row["determination"] or "").lower()
-        if outcome == "approved":
+        if is_approved(row["determination"]):
             entry["approved"] += 1
-        elif outcome in ("denied", "not approved"):
+        elif is_denied(row["determination"]):
             entry["denied"] += 1
         if row["phase"] == 2:
             entry["phase2"] += 1

@@ -88,7 +88,7 @@ or document).
 | `mergers noccs --search "<text>"` | Search NOCC paragraph text |
 | `mergers industries` | Activity breakdown by ANZSIC industry |
 | `mergers industries --show <name>` | Mergers within an industry |
-| `mergers stats` | Aggregate statistics |
+| `mergers stats` | Headline statistics (totals, clearance rate, time to determination, determinations by phase) |
 | `mergers stats --by year` | Grouped counts (also `industry`, `acquirer`, `outcome`, `phase`) |
 | `mergers browse` | Launch an interactive TUI browser (requires the CLI's optional `[browse]` extra) |
 | `mergers cache path` | Print the local cache directory |
@@ -99,7 +99,7 @@ or document).
 
 | Flag | Values |
 |---|---|
-| `--outcome` | `approved`, `denied`, `phase2`, `pending` |
+| `--outcome` | `approved` (incl. conditional), `conditional`, `denied`, `ceased`, `phase2`, `pending` (still live — including a matter back under assessment in the public benefit phase) |
 | `--industry` | Partial name match, case-insensitive |
 | `--phase` | `0` (waivers), `1`, or `2` |
 | `--waiver` / `--no-waiver` | Filter to waivers or notifications only |
@@ -111,7 +111,8 @@ or document).
 | `--acquirer <name>` | Acquirer name contains this string (case-insensitive) |
 | `--target <name>` | Target name contains this string (case-insensitive) |
 | `--under-appeal` / `--no-under-appeal` | Filter to mergers currently under Australian Competition Tribunal appeal (or not) |
-| `--has-judicial-review` / `--no-judicial-review` | Filter to mergers that do (or do not) have a Federal Court judicial review filed |
+| `--has-judicial-review` / `--no-judicial-review` | Filter to mergers that do (or do not) have a Federal Court judicial review filed (live or concluded) |
+| `--under-judicial-review` / `--not-under-judicial-review` | Filter to mergers whose Federal Court review is (or is not) still live |
 
 `list` additionally accepts `--sort date-desc|date-asc|name|duration`
 (default `date-desc`).
@@ -174,13 +175,37 @@ linked matter.
 is present (also reachable directly via `--section appeal`), and
 `mergers show <id> --json` carries the full objects:
 
-- `appeal` — Australian Competition Tribunal appeal details (tribunal
-  number, tribunal URL, appeal type, appellant, lifecycle status, outcome,
-  filed date, documents). `under_appeal` is `true` only while the appeal is
-  still current; a concluded or withdrawn appeal keeps the `appeal` record
-  but `under_appeal` is `false`.
-- `judicial_review` — a Federal Court judicial review record (applicant,
-  filed date, case number, case URL), where one has been filed.
+- `appeals` — one record per Australian Competition Tribunal matter
+  (tribunal number, URL, appeal type, appellant, status, outcome, effective
+  determination, filed/hearing/concluded dates, and its filed `documents`).
+  A merger can have more than one (MN-65005: ACT 3 by IAG, ACT 4 by RACWA).
+  `appeal` is the merger-level summary of them. `under_appeal` is `true` only
+  while an appeal is still current; a concluded or withdrawn appeal keeps its
+  records but `under_appeal` is `false`. Once an appeal concludes, its
+  `effective_determination` is the outcome shown everywhere.
+- `judicial_reviews` — one record per Federal Court file (case number,
+  court, applicant, status, outcome, filed/concluded dates, `listings`);
+  `judicial_review` is the summary. `under_judicial_review` is `true` while
+  a review is live (`--under-judicial-review`).
+
+### Outcomes, ceased matters and the public benefit phase
+
+The outcome (`determination` in list/search JSON, "Outcome" in tables)
+matches mergers.fyi:
+
+- `Approved with conditions` — a conditional clearance (`--outcome
+  conditional`; `--outcome approved` includes these).
+- `Assessment ceased` — the ACCC stopped assessing (usually the parties
+  withdrew); `ceased_date` says when (`--outcome ceased`).
+- A matter whose Phase 2 refusal is followed by a public benefit
+  application is live again (`--outcome pending`) until the public benefit
+  determination; its Phase 2 outcome stays in `phase_2_determination` and it
+  still counts as Phase 2.
+- `pre_notification_summary` — when pre-notification contact with the ACCC
+  is estimated to have begun: `kind` (`around`, `after`, `before`, `none`),
+  `start_date`, `confidence`.
+- `mergers timeline <id> --json` includes `upcoming` (statutory deadline,
+  public benefit response date, hearings).
 
 ## Typical query patterns
 
@@ -215,6 +240,10 @@ is present (also reachable directly via `--section appeal`), and
 | Which mergers are currently under Tribunal appeal? | `mergers list --under-appeal --json` |
 | Has this merger been challenged by judicial review? | `mergers show <id> --section appeal` (or `--json` and check `judicial_review`) |
 | Which mergers have had a judicial review filed? | `mergers list --has-judicial-review --json` |
+| Which Federal Court reviews are still running? | `mergers list --under-judicial-review --json` |
+| Which clearances came with conditions? | `mergers list --outcome conditional --json` |
+| Which assessments were abandoned? | `mergers list --outcome ceased --json` |
+| What's coming up on a live matter? | `mergers timeline <id> --json` and check `upcoming` |
 | Did the ACCC waive this notification? | `mergers show <id> --json` and check `phase` for `0` (waivers) |
 | How long is a specific merger's phase 1 review expected to take? | `mergers show <id> --json` and check `phase_1_estimate` (frozen at filing) |
 | Export results to paste into a spreadsheet. | Add `--csv` to `search`, `list`, `party`, or `new` |
